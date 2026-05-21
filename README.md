@@ -1,6 +1,6 @@
-# plural-mpp-buyer-sdk (Python)
+# pinelabs-online-mpp-buyer-sdk (Python)
 
-Python port of [`@plural/mpp-buyer-sdk`](../mpp-buyer-sdk). x402 Machine
+Python port of [`@pinelabs-online/mpp-buyer-sdk`](../mpp-buyer-sdk). x402 Machine
 Payments Protocol client for AI agents.
 
 Automatically intercepts HTTP 402 Payment Required responses, constructs
@@ -10,7 +10,7 @@ payment handling required.
 ## Installation
 
 ```bash
-pip install plural-mpp-buyer-sdk
+pip install pinelabs-online-mpp-buyer-sdk
 # or from source
 cd mpp-buyer-sdk-python
 pip install -e .
@@ -21,9 +21,9 @@ Requires Python ≥ 3.9. Depends on `httpx` and `PyJWT[crypto]`.
 ## Quick Start
 
 ```python
-from plural_mpp_buyer import PluralBuyer, PluralBuyerConfig, MppEnvironment
+from pinelabs-online_mpp_buyer import pinelabs-onlineBuyer, pinelabs-onlineBuyerConfig, MppEnvironment
 
-buyer = PluralBuyer.create(PluralBuyerConfig(
+buyer = pinelabs-onlineBuyer.create(pinelabs-onlineBuyerConfig(
     clientId="your-client-id",
     clientSecret="your-client-secret",
     baseUrl=MppEnvironment.SANDBOX,  # or MppEnvironment.PRODUCTION
@@ -36,23 +36,23 @@ print(response.json())
 buyer.close()
 ```
 
-`PluralBuyer.create(...)` supports context-manager usage to release the
+`pinelabs-onlineBuyer.create(...)` supports context-manager usage to release the
 underlying HTTP client:
 
 ```python
-with PluralBuyer.create(config) as buyer:
+with pinelabs-onlineBuyer.create(config) as buyer:
     response = buyer.get(url)
 ```
 
 ## Configuration
 
 ```python
-from plural_mpp_buyer import (
-    PluralBuyer, PluralBuyerConfig, TokenDefaults,
+from pinelabs-online_mpp_buyer import (
+    pinelabs-onlineBuyer, pinelabs-onlineBuyerConfig, TokenDefaults,
     GrantexConfig, JwksConfig, MppEnvironment,
 )
 
-buyer = PluralBuyer.create(PluralBuyerConfig(
+buyer = pinelabs-onlineBuyer.create(pinelabs-onlineBuyerConfig(
     clientId="…", clientSecret="…",
 
     baseUrl=MppEnvironment.SANDBOX,
@@ -89,11 +89,11 @@ buyer = PluralBuyer.create(PluralBuyerConfig(
 
 ## API
 
-### `PluralBuyer.create(config)`  /  `PluralBuyer.create_verified(config)`
+### `pinelabs-onlineBuyer.create(config)`  /  `pinelabs-onlineBuyer.create_verified(config)`
 
 `create_verified` additionally verifies the Grantex grant token before returning.
 
-### `PluralBuyerInstance`
+### `pinelabs-onlineBuyerInstance`
 
 | Attribute | Description |
 |---|---|
@@ -107,7 +107,7 @@ buyer = PluralBuyer.create(PluralBuyerConfig(
 ## Utilities
 
 ```python
-from plural_mpp_buyer import decode_challenge, decode_receipt, validate_challenge
+from pinelabs-online_mpp_buyer import decode_challenge, decode_receipt, validate_challenge
 
 challenge = decode_challenge(www_authenticate_header)
 validate_challenge(challenge)
@@ -117,7 +117,7 @@ receipt = decode_receipt(payment_receipt_header)
 ## Error handling
 
 ```python
-from plural_mpp_buyer import MppError, MppNetworkError, MppChallengeError
+from pinelabs-online_mpp_buyer import MppError, MppNetworkError, MppChallengeError
 
 try:
     response = buyer.get(url)
@@ -132,12 +132,12 @@ except MppError as err:
 ## Grantex (AI Agent Authorization)
 
 ```python
-from plural_mpp_buyer import (
-    PluralBuyer, PluralBuyerConfig, GrantexConfig, JwksConfig,
+from pinelabs-online_mpp_buyer import (
+    pinelabs-onlineBuyer, pinelabs-onlineBuyerConfig, GrantexConfig, JwksConfig,
     check_payment_authorization, extract_spending_limit, has_scope, parse_scope,
 )
 
-buyer = PluralBuyer.create_verified(PluralBuyerConfig(
+buyer = pinelabs-onlineBuyer.create_verified(pinelabs-onlineBuyerConfig(
     clientId="…", clientSecret="…",
     grantex=GrantexConfig(
         grantToken=grant_token,

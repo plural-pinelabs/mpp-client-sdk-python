@@ -1,7 +1,7 @@
-# pinelabs-online-mpp-client-sdk (Python)
+# pinelabs-online-mpp-buyer-sdk (Python)
 
-Python port of [`@pinelabs-online/mpp-client-sdk`](../mpp-client-sdk). x402 Machine
-Payments Protocol client for AI agents.
+Python port of [`@pinelabs-online/mpp-buyer-sdk`](../mpp-buyer-sdk). x402 Machine
+Payments Protocol buyer for AI agents.
 
 Automatically intercepts HTTP 402 Payment Required responses, constructs
 UPI SBMD credentials, and completes the payment flow — zero manual
@@ -10,9 +10,9 @@ payment handling required.
 ## Installation
 
 ```bash
-pip install pinelabs-online-mpp-client-sdk
+pip install pinelabs-online-mpp-buyer-sdk
 # or from source
-cd mpp-client-sdk-python
+cd mpp-buyer-sdk-python
 pip install -e .
 ```
 
@@ -21,39 +21,39 @@ Requires Python ≥ 3.9. Depends on `httpx` and `PyJWT[crypto]`.
 ## Quick Start
 
 ```python
-from pinelabs-online_mpp_client import pinelabs-onlineclient, pinelabs-onlineclientConfig, MppEnvironment
+from pinelabs-online_mpp_buyer import pinelabs-onlinebuyer, pinelabs-onlinebuyerConfig, MppEnvironment
 
-client = pinelabs-onlineclient.create(pinelabs-onlineclientConfig(
-    clientId="your-client-id",
-    clientSecret="your-client-secret",
+buyer = pinelabs-onlinebuyer.create(pinelabs-onlinebuyerConfig(
+    buyerId="your-buyer-id",
+    buyerSecret="your-buyer-secret",
     baseUrl=MppEnvironment.SANDBOX,  # or MppEnvironment.PRODUCTION
 ))
 
-# `client.get` / `client.post` / `client.request` intercept 402s automatically.
-response = client.get("https://api.example.com/paid-resource")
+# `buyer.get` / `buyer.post` / `buyer.request` intercept 402s automatically.
+response = buyer.get("https://api.example.com/paid-resource")
 print(response.json())
 
-client.close()
+buyer.close()
 ```
 
-`pinelabs-onlineclient.create(...)` supports context-manager usage to release the
-underlying HTTP client:
+`pinelabs-onlinebuyer.create(...)` supports context-manager usage to release the
+underlying HTTP buyer:
 
 ```python
-with pinelabs-onlineclient.create(config) as client:
-    response = client.get(url)
+with pinelabs-onlinebuyer.create(config) as buyer:
+    response = buyer.get(url)
 ```
 
 ## Configuration
 
 ```python
-from pinelabs-online_mpp_client import (
-    pinelabs-onlineclient, pinelabs-onlineclientConfig, TokenDefaults,
+from pinelabs-online_mpp_buyer import (
+    pinelabs-onlinebuyer, pinelabs-onlinebuyerConfig, TokenDefaults,
     GrantexConfig, JwksConfig, MppEnvironment,
 )
 
-client = pinelabs-onlineclient.create(pinelabs-onlineclientConfig(
-    clientId="…", clientSecret="…",
+buyer = pinelabs-onlinebuyer.create(pinelabs-onlinebuyerConfig(
+    buyerId="…", buyerSecret="…",
 
     baseUrl=MppEnvironment.SANDBOX,
     autoHandlePayment=True,
@@ -78,7 +78,7 @@ client = pinelabs-onlineclient.create(pinelabs-onlineclientConfig(
 
 ## How the 402 flow works
 
-1. Your code calls `client.get(url)` (or any HTTP method).
+1. Your code calls `buyer.get(url)` (or any HTTP method).
 2. If the server returns **HTTP 402** with a `WWW-Authenticate: Payment <challenge>` header, the SDK:
    - decodes the challenge,
    - creates a one-time UPI SBMD payment token,
@@ -89,25 +89,25 @@ client = pinelabs-onlineclient.create(pinelabs-onlineclientConfig(
 
 ## API
 
-### `pinelabs-onlineclient.create(config)`  /  `pinelabs-onlineclient.create_verified(config)`
+### `pinelabs-onlinebuyer.create(config)`  /  `pinelabs-onlinebuyer.create_verified(config)`
 
 `create_verified` additionally verifies the Grantex grant token before returning.
 
-### `pinelabs-onlineclientInstance`
+### `pinelabs-onlinebuyerInstance`
 
 | Attribute | Description |
 |---|---|
 | `get`, `post`, `put`, `delete`, `patch`, `request`, `fetch` | HTTP methods with 402 interception |
-| `raw_http` | Underlying `httpx.Client` (no interception) |
+| `raw_http` | Underlying `httpx.buyer` (no interception) |
 | `methods.create_mandate(...)` / `.get_mandate(...)` / `.create_token(...)` | Direct MPP API ops |
 | `create_credential(challenge)` | Manually build a credential |
 | `grant_claims` / `verify_grant()` | Grantex helpers |
-| `close()` / context manager | Close the HTTP client |
+| `close()` / context manager | Close the HTTP buyer |
 
 ## Utilities
 
 ```python
-from pinelabs-online_mpp_client import decode_challenge, decode_receipt, validate_challenge
+from pinelabs-online_mpp_buyer import decode_challenge, decode_receipt, validate_challenge
 
 challenge = decode_challenge(www_authenticate_header)
 validate_challenge(challenge)
@@ -117,10 +117,10 @@ receipt = decode_receipt(payment_receipt_header)
 ## Error handling
 
 ```python
-from pinelabs-online_mpp_client import MppError, MppNetworkError, MppChallengeError
+from pinelabs-online_mpp_buyer import MppError, MppNetworkError, MppChallengeError
 
 try:
-    response = client.get(url)
+    response = buyer.get(url)
 except MppChallengeError as err:
     ...
 except MppNetworkError as err:
@@ -132,20 +132,20 @@ except MppError as err:
 ## Grantex (AI Agent Authorization)
 
 ```python
-from pinelabs-online_mpp_client import (
-    pinelabs-onlineclient, pinelabs-onlineclientConfig, GrantexConfig, JwksConfig,
+from pinelabs-online_mpp_buyer import (
+    pinelabs-onlinebuyer, pinelabs-onlinebuyerConfig, GrantexConfig, JwksConfig,
     check_payment_authorization, extract_spending_limit, has_scope, parse_scope,
 )
 
-client = pinelabs-onlineclient.create_verified(pinelabs-onlineclientConfig(
-    clientId="…", clientSecret="…",
+buyer = pinelabs-onlinebuyer.create_verified(pinelabs-onlinebuyerConfig(
+    buyerId="…", buyerSecret="…",
     grantex=GrantexConfig(
         grantToken=grant_token,
         jwks=JwksConfig(jwksUrl="https://grantex.dev/.well-known/jwks.json"),
     ),
 ))
 
-print(client.grant_claims)  # GrantTokenClaims(...)
+print(buyer.grant_claims)  # GrantTokenClaims(...)
 ```
 
 ## License

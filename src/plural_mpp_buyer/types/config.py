@@ -1,8 +1,7 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Protocol
 
-from .challenge import Challenge, Credential, Receipt
-from .grantex import GrantexConfig, GrantTokenClaims
+from .challenge import Challenge, Receipt
 
 
 class MppLogger(Protocol):
@@ -42,7 +41,6 @@ class PluralBuyerConfig:
     maxRetries: Optional[int] = None
     initialRetryDelayMs: Optional[int] = None
     logger: Optional[MppLogger] = None
-    grantex: Optional[GrantexConfig] = None
     accessToken: Optional[str] = None
 
 

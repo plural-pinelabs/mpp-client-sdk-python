@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-from typing import Optional
-
 import httpx
 
 from ..config.environments import DEFAULT_BASE_URL
 from ..types.challenge import Challenge, Credential
 from ..types.config import PluralBuyerConfig
-from ..types.grantex import GrantTokenClaims
 from ..types.mandate import CreateMandateOptions, Mandate
 from ..types.token import CreateTokenOptions, Token
 from ..utils.validation import validate_config
@@ -46,7 +43,6 @@ class PluralBuyerInstance:
     - `raw_request`/`raw_http` — the underlying httpx client (no interception)
     - `methods` — direct MPP API operations (create_mandate, create_token, ...)
     - `create_credential(challenge)` — manually build a credential
-    - `grant_claims` / `verify_grant()` — Grantex helpers
     """
 
     def __init__(
@@ -58,7 +54,6 @@ class PluralBuyerInstance:
         self._interceptor = interceptor
         self._http = http_client
         self.methods = methods
-        self.grant_claims: Optional[GrantTokenClaims] = None
 
     # ── Intercepting HTTP API ───────────────────────────────────
 
@@ -94,17 +89,11 @@ class PluralBuyerInstance:
         """Send an HTTP request without automatic 402 payment handling."""
         return self._http.request(method, url, **kwargs)
 
-    # ── Credential / Grantex helpers ────────────────────────────
+    # ── Credential helpers ──────────────────────────────────────
 
     def create_credential(self, challenge: Challenge) -> Credential:
         """Manually create a Payment credential for a decoded seller challenge."""
         return self._interceptor.create_credential_for_challenge(challenge)
-
-    def verify_grant(self) -> Optional[GrantTokenClaims]:
-        """Verify the configured Grantex grant token and cache its claims."""
-        claims = self._interceptor.verify_grant()
-        self.grant_claims = claims
-        return claims
 
     def close(self) -> None:
         self._http.close()
@@ -154,14 +143,3 @@ class PluralBuyer:
         interceptor = FetchInterceptor(config, api_client, http_client)
         methods = BuyerMethods(api_client)
         return PluralBuyerInstance(interceptor, http_client, methods)
-
-    @staticmethod
-    def create_verified(config: PluralBuyerConfig) -> PluralBuyerInstance:
-        """Create an instance and verify the Grantex grant token immediately.
-
-        Raises if verification fails.
-        """
-        instance = PluralBuyer.create(config)
-        if config.grantex is not None:
-            instance.verify_grant()
-        return instance

@@ -16,16 +16,10 @@ from plural_mpp_buyer import (
     PluralBuyerConfig,
     decode_challenge,
     decode_receipt,
-    has_scope,
-    parse_scope,
 )
 from plural_mpp_buyer.client.credential_builder import (
     build_credential,
     encode_credential_header,
-)
-from plural_mpp_buyer.grantex import (
-    check_payment_authorization,
-    extract_spending_limit,
 )
 from plural_mpp_seller import (
     ChargeOptions,
@@ -59,43 +53,6 @@ def _buyer_config(base_url: str) -> PluralBuyerConfig:
         baseUrl=base_url,
         maxRetries=0,
     )
-
-
-def test_scope_parsing_and_limits() -> None:
-    parsed = parse_scope("mpp:payment:initiate:max_500")
-    assert parsed is not None
-    assert parsed.resource == "mpp:payment"
-    assert parsed.action == "initiate"
-    assert parsed.constraint == "max_500"
-
-    assert has_scope(["mpp:payment:initiate:max_500"], "mpp:payment:initiate")
-    assert has_scope(["mpp:*"], "mpp:payment:initiate")
-    assert not has_scope(["mpp:mandate:read"], "mpp:payment:initiate")
-
-    limit = extract_spending_limit(["mpp:payment:initiate:max_500"])
-    assert limit is not None
-    assert limit.maxAmountPaise == 50_000
-    assert limit.currency == "INR"
-
-
-def test_buyer_authorization_check() -> None:
-    from plural_mpp_buyer.types.grantex import GrantTokenClaims
-
-    claims = GrantTokenClaims(
-        iss="https://grantex.example",
-        sub="user-1",
-        agt="agent-1",
-        scp=["mpp:payment:initiate:max_500"],
-        grnt="grant-1",
-        iat=0,
-        exp=0,
-    )
-    ok = check_payment_authorization(claims, 25_000)
-    assert ok.authorized is True
-
-    too_much = check_payment_authorization(claims, 80_000)
-    assert too_much.authorized is False
-    assert "exceeds" in (too_much.reason or "").lower()
 
 
 def test_challenge_roundtrip() -> None:

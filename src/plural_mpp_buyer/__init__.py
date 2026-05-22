@@ -14,18 +14,6 @@ from .client import (
     validate_challenge,
 )
 from .config.environments import DEFAULT_BASE_URL, MppEnvironment
-from .grantex import (
-    AuthorizationCheckResult,
-    GrantAuditLogger,
-    GrantVerifier,
-    MppScopes,
-    check_payment_authorization,
-    create_audit_pusher,
-    extract_per_transaction_limit,
-    extract_spending_limit,
-    has_scope,
-    parse_scope,
-)
 from .types import (
     Amount,
     Challenge,
@@ -34,15 +22,10 @@ from .types import (
     CreateTokenOptions,
     Credential,
     CredentialPayload,
-    GrantexConfig,
-    GrantTokenClaims,
-    GrantVerificationResult,
-    JwksConfig,
     Mandate,
     MppErrorCode,
     PluralBuyerConfig,
     Receipt,
-    SpendingLimit,
     Token,
     TokenDefaults,
 )
@@ -50,7 +33,6 @@ from .utils.errors import MppChallengeError, MppError, MppNetworkError
 
 __all__ = [
     "Amount",
-    "AuthorizationCheckResult",
     "Challenge",
     "ChallengeRequest",
     "CreateMandateOptions",
@@ -58,12 +40,6 @@ __all__ = [
     "Credential",
     "CredentialPayload",
     "DEFAULT_BASE_URL",
-    "GrantAuditLogger",
-    "GrantTokenClaims",
-    "GrantVerificationResult",
-    "GrantVerifier",
-    "GrantexConfig",
-    "JwksConfig",
     "Mandate",
     "MppChallengeError",
     "MppEnvironment",
@@ -75,20 +51,13 @@ __all__ = [
     "PluralBuyerConfig",
     "PluralBuyerInstance",
     "Receipt",
-    "SpendingLimit",
     "Token",
     "TokenDefaults",
     "build_credential",
-    "check_payment_authorization",
-    "create_audit_pusher",
     "decode_challenge",
     "decode_receipt",
     "encode_credential_header",
     "extract_amount_paise",
-    "extract_per_transaction_limit",
-    "extract_spending_limit",
-    "has_scope",
-    "parse_scope",
     "validate_challenge",
 ]
 

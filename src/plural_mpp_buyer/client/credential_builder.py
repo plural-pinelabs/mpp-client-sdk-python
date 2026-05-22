@@ -101,7 +101,7 @@ def validate_challenge(challenge: Challenge) -> None:
 
 
 def extract_amount_paise(challenge: Challenge) -> int:
-    """Return the challenge amount in paise for limit checks and token creation."""
+    """Return the challenge amount in paise for token creation."""
     try:
         major_units = float(challenge.request.amount)
     except (TypeError, ValueError) as exc:

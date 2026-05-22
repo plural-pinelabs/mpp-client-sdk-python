@@ -6,12 +6,8 @@ from typing import Any, Dict, Optional
 
 import httpx
 
-from ..grantex.audit_logger import GrantAuditLogger
-from ..grantex.grant_verifier import GrantVerifier
-from ..grantex.scopes import check_payment_authorization
-from ..types.challenge import Challenge, Credential, Receipt
+from ..types.challenge import Challenge, Credential
 from ..types.config import PluralBuyerConfig
-from ..types.grantex import GrantTokenClaims
 from ..types.token import CreateTokenOptions
 from .api_client import ApiClient
 from .credential_builder import (
@@ -19,7 +15,6 @@ from .credential_builder import (
     decode_challenge,
     decode_receipt,
     encode_credential_header,
-    extract_amount_paise,
 )
 
 def _maybe_await(result: Any) -> None:
@@ -44,50 +39,6 @@ class FetchInterceptor:
         self._config = config
         self._api = api_client
         self._http = http_client
-
-        self._grant_verifier: Optional[GrantVerifier] = None
-        self._audit_logger: Optional[GrantAuditLogger] = None
-        if config.grantex is not None:
-            self._grant_verifier = GrantVerifier(config.grantex.jwks, http_client)
-            self._audit_logger = GrantAuditLogger(config.grantex)
-
-        self._verified_claims: Optional[GrantTokenClaims] = None
-        self._total_spent_paise: int = 0
-
-    # ── Grantex ─────────────────────────────────────────────────
-
-    def verify_grant(self) -> Optional[GrantTokenClaims]:
-        """Verify the configured Grantex token and cache claims for later spend checks."""
-        if self._config.grantex is None or self._grant_verifier is None:
-            return None
-
-        result = self._grant_verifier.verify(
-            self._config.grantex.grantToken,
-            self._config.grantex.agentId,
-        )
-        if not result.valid or result.claims is None:
-            reason = result.error or "Unknown verification failure"
-            if self._config.grantex.onGrantDenied is not None:
-                from ..types.grantex import GrantDeniedContext
-                ctx = GrantDeniedContext(
-                    grantId="unknown",
-                    agentId=self._config.grantex.agentId or "unknown",
-                )
-                _maybe_await(self._config.grantex.onGrantDenied(reason, ctx))
-            raise RuntimeError(f"Grantex grant verification failed: {reason}")
-
-        self._verified_claims = result.claims
-        if self._audit_logger is not None:
-            self._audit_logger.log_grant_verified(result.claims)
-        return result.claims
-
-    @property
-    def grant_claims(self) -> Optional[GrantTokenClaims]:
-        return self._verified_claims
-
-    @property
-    def grant_total_spent(self) -> int:
-        return self._total_spent_paise
 
     # ── Fetch wrapper ───────────────────────────────────────────
 
@@ -157,48 +108,6 @@ class FetchInterceptor:
     ) -> httpx.Response:
         challenge = decode_challenge(www_auth_header)
 
-        # Grantex authorization pre-check
-        if self._config.grantex is not None and self._verified_claims is not None:
-            amount_paise = extract_amount_paise(challenge)
-            resource = challenge.request.resource
-            enforce = self._config.grantex.enforceSpendingLimits is not False
-
-            auth_result = check_payment_authorization(
-                self._verified_claims,
-                amount_paise,
-                self._total_spent_paise if enforce else 0,
-            )
-
-            if not auth_result.authorized:
-                reason = auth_result.reason or "Payment not authorized by grant"
-                if self._audit_logger is not None:
-                    self._audit_logger.log_payment_denied(
-                        self._verified_claims, amount_paise, resource, reason
-                    )
-                if self._config.grantex.onGrantDenied is not None:
-                    from ..types.grantex import GrantDeniedContext
-                    ctx = GrantDeniedContext(
-                        grantId=self._verified_claims.grnt,
-                        agentId=self._verified_claims.agt,
-                        requestedAmount=amount_paise,
-                        requestedResource=resource,
-                        scopeViolation=reason,
-                    )
-                    _maybe_await(self._config.grantex.onGrantDenied(reason, ctx))
-                raise RuntimeError(f"Grantex authorization denied: {reason}")
-
-            if auth_result.spendingLimit is not None and self._audit_logger is not None:
-                self._audit_logger.log_spending_limit_checked(
-                    self._verified_claims,
-                    amount_paise,
-                    self._total_spent_paise,
-                    auth_result.spendingLimit.maxAmountPaise,
-                )
-            if self._audit_logger is not None:
-                self._audit_logger.log_payment_authorized(
-                    self._verified_claims, amount_paise, resource
-                )
-
         if self._config.onChallenge is not None:
             _maybe_await(self._config.onChallenge(challenge))
 
@@ -207,15 +116,10 @@ class FetchInterceptor:
 
         retry_headers: Dict[str, str] = dict(headers or {})
         retry_headers["Authorization"] = credential_header
-        if self._config.grantex is not None and self._config.grantex.grantToken:
-            retry_headers["X-Grantex-Token"] = self._config.grantex.grantToken
 
         retry_response = self._http.request(method, url, headers=retry_headers, **kwargs)
 
         if retry_response.is_success:
-            if self._verified_claims is not None:
-                self._total_spent_paise += extract_amount_paise(challenge)
-
             if self._config.onPaymentComplete is not None:
                 receipt_header = retry_response.headers.get("Payment-Receipt")
                 if receipt_header:

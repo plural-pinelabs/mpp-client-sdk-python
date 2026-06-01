@@ -1,6 +1,9 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
+from .payment import PaymentMethod
+from .mandate import Amount
+
 
 @dataclass
 class UsageLimits:
@@ -31,9 +34,9 @@ class TokenHold:
 
 @dataclass
 class Token:
-    """Normalized one-time MPP payment token response.
+    """Normalized one-time P3P payment token response.
 
-    The current MPP service contract returns `payment_token`, `expires_in`,
+    The current P3P service contract returns `payment_token`, `expires_in`,
     `type`, and `authorization_id`; additional fields remain optional
     compatibility slots for older responses.
     """
@@ -48,6 +51,7 @@ class Token:
     hold: TokenHold
     usage_limits: UsageLimits
     usage: TokenUsage
+    expires_in: int
     metadata: Optional[Dict[str, str]]
     created_at: str
     raw: Dict[str, Any] = field(default_factory=dict)
@@ -65,15 +69,18 @@ class CreateTokenUsageLimits:
 
 @dataclass
 class CreateTokenOptions:
-    """Input for `buyer.methods.create_token`.
+    """Input for `client.methods.create_token`.
 
-    The current MPP contract requires only `type` and `customer_reference`.
-    `mandateId` is intentionally not part of this object.
+    The current P3P contract requires `type`, nested `customer`,
+    `challenge_id`, and `payment_amount`.
     """
 
     usageLimits: Optional[CreateTokenUsageLimits] = None
+    customerKey: Optional[str] = None
     customerReference: Optional[str] = None
     customerId: Optional[str] = None
+    mobileNumber: Optional[str] = None
     challengeId: Optional[str] = None
+    paymentAmount: Optional[Amount] = None
     metadata: Optional[Dict[str, str]] = None
-    paymentType: str = "SBMD"
+    paymentMethod: Optional[PaymentMethod] = None

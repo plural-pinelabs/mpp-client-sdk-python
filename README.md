@@ -1,151 +1,119 @@
-# pinelabs-online-mpp-client-sdk (Python)
+# Pine Labs Online P3P Client SDK (Python)
 
-Python port of [`@pinelabs-online/mpp-client-sdk`](../mpp-client-sdk). x402 Machine
-Payments Protocol client for AI agents.
-
-Automatically intercepts HTTP 402 Payment Required responses, constructs
-UPI SBMD credentials, and completes the payment flow — zero manual
-payment handling required.
+Python SDK for Pine Labs Online P3P client integrations. It mirrors
+`@pine-labs-online/p3p-client-sdk`, intercepts HTTP 402 Payment Required
+responses, creates customer-scoped P3P payment credentials, and retries paid
+requests.
 
 ## Installation
 
 ```bash
-pip install pinelabs-online-mpp-client-sdk
-# or from source
-cd mpp-client-sdk-python
-pip install -e .
+pip install pinelabs-p3p-client-sdk
 ```
 
-Requires Python ≥ 3.9. Depends on `httpx` and `PyJWT[crypto]`.
+Import module: `pinelabs_p3p_client`. Requires Python 3.9 or newer.
 
 ## Quick Start
 
 ```python
-from pinelabs-online_mpp_client import pinelabs-onlineclient, pinelabs-onlineclientConfig, MppEnvironment
+from pinelabs_p3p_client import (
+    ClientRuntimeContext,
+    P3PEnvironment,
+    PaymentMethod,
+    PineLabsOnlineClient,
+    PineLabsOnlineClientConfig,
+)
 
-client = pinelabs-onlineclient.create(pinelabs-onlineclientConfig(
-    clientId="your-client-id",
-    clientSecret="your-client-secret",
-    baseUrl=MppEnvironment.SANDBOX,  # or MppEnvironment.PRODUCTION
+client = PineLabsOnlineClient.create(PineLabsOnlineClientConfig(
+    env=P3PEnvironment.SANDBOX,
+    selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
+    clientId="client-client-id",
+    clientSecret="client-client-secret",
 ))
 
-# `client.get` / `client.post` / `client.request` intercept 402s automatically.
-response = client.get("https://api.example.com/paid-resource")
+response = client.get(
+    "https://server.example.com/api/premium",
+    context=ClientRuntimeContext(
+        customerReference="9876543210",
+        mobileNumber="9876543210",
+    ),
+)
 print(response.json())
-
 client.close()
 ```
 
-`pinelabs-onlineclient.create(...)` supports context-manager usage to release the
-underlying HTTP client:
+Customer identity is runtime context, not static SDK config. This lets one
+client instance safely serve many customers.
+
+By default, the SDK uses client-credentials customer auth: it exchanges
+`clientId` and `clientSecret` through `POST /api/auth/v1/token`, then calls
+`POST /mpp/v1/token`.
+
+For customer API-token flows, explicitly set
+`customerAuthMode=P3PCustomerAuthMode.CustomerKey` and pass `customerKey` plus
+`mobileNumber` in `ClientRuntimeContext`.
+
+## 402 Flow
+
+1. Your code calls `client.get(url, context=...)`.
+2. The server returns `HTTP 402` with `WWW-Authenticate: Payment <challenge>`.
+3. The SDK decodes the challenge and validates amount, expiry, and accepted payment methods.
+4. The SDK creates a token:
+   - default mode: `POST /mpp/v1/token` with `Authorization: Bearer <token>`
+   - customer-key mode: `POST /api/v1/customer/mpp/token` with `X-Customer-Key`
+   - `customer.merchant_customer_reference` and/or `customer.mobile_number`
+   - `challenge_id`
+   - `payment_amount.value` in minor units
+5. The SDK retries the server with `P3P-Credential: Payment <credential>`.
+6. The server captures the payment and may return `Payment-Receipt`.
+
+## Direct Token API
 
 ```python
-with pinelabs-onlineclient.create(config) as client:
-    response = client.get(url)
-```
+from pinelabs_p3p_client import Amount, CreateTokenOptions, PaymentMethod
 
-## Configuration
-
-```python
-from pinelabs-online_mpp_client import (
-    pinelabs-onlineclient, pinelabs-onlineclientConfig, TokenDefaults,
-    GrantexConfig, JwksConfig, MppEnvironment,
-)
-
-client = pinelabs-onlineclient.create(pinelabs-onlineclientConfig(
-    clientId="…", clientSecret="…",
-
-    baseUrl=MppEnvironment.SANDBOX,
-    autoHandlePayment=True,
-
-    requestTimeoutMs=30_000,
-    maxRetries=3,
-    initialRetryDelayMs=500,
-
-    onChallenge=lambda challenge: None,
-    onPaymentComplete=lambda receipt: None,
-
-    tokenDefaults=TokenDefaults(maxCharges=10, ttlSeconds=3600),
-
-    grantex=GrantexConfig(
-        grantToken="eyJ…",
-        jwks=JwksConfig(jwksUrl="https://grantex.dev/.well-known/jwks.json"),
-        agentId="my-agent",
-        enforceSpendingLimits=True,
-    ),
+token = client.methods.create_token(CreateTokenOptions(
+    customerReference="9876543210",
+    mobileNumber="9876543210",
+    challengeId="ch_...",
+    paymentAmount=Amount(value=50000, currency="INR"),
+    paymentMethod=PaymentMethod.UPI_RESERVE_PAY,
 ))
 ```
 
-## How the 402 flow works
+The client SDK no longer creates mandates. Mandate/pre-authorization creation
+is handled by the server SDK.
 
-1. Your code calls `client.get(url)` (or any HTTP method).
-2. If the server returns **HTTP 402** with a `WWW-Authenticate: Payment <challenge>` header, the SDK:
-   - decodes the challenge,
-   - creates a one-time UPI SBMD payment token,
-   - builds a credential,
-   - retries the request with `Authorization: Payment <credential>`.
-3. The server captures the payment and returns **HTTP 200** with a `Payment-Receipt` header.
-4. Your code receives the final 200 response transparently.
-
-## API
-
-### `pinelabs-onlineclient.create(config)`  /  `pinelabs-onlineclient.create_verified(config)`
-
-`create_verified` additionally verifies the Grantex grant token before returning.
-
-### `pinelabs-onlineclientInstance`
-
-| Attribute | Description |
-|---|---|
-| `get`, `post`, `put`, `delete`, `patch`, `request`, `fetch` | HTTP methods with 402 interception |
-| `raw_http` | Underlying `httpx.client` (no interception) |
-| `methods.create_mandate(...)` / `.get_mandate(...)` / `.create_token(...)` | Direct MPP API ops |
-| `create_credential(challenge)` | Manually build a credential |
-| `grant_claims` / `verify_grant()` | Grantex helpers |
-| `close()` / context manager | Close the HTTP client |
-
-## Utilities
+Customer-key mode remains available:
 
 ```python
-from pinelabs-online_mpp_client import decode_challenge, decode_receipt, validate_challenge
+from pinelabs_p3p_client import P3PCustomerAuthMode
 
-challenge = decode_challenge(www_authenticate_header)
-validate_challenge(challenge)
-receipt = decode_receipt(payment_receipt_header)
+customer_key_client = PineLabsOnlineClient.create(PineLabsOnlineClientConfig(
+    env=P3PEnvironment.SANDBOX,
+    selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
+    customerAuthMode=P3PCustomerAuthMode.CustomerKey,
+))
 ```
 
-## Error handling
+## Supported Methods
+
+- `PaymentMethod.UPI_RESERVE_PAY` -> `"SBMD"` / UPI ReservePay
+- `PaymentMethod.Crypto` -> `"CRYPTO"`
+
+## Error Handling
 
 ```python
-from pinelabs-online_mpp_client import MppError, MppNetworkError, MppChallengeError
+from pinelabs_p3p_client import P3PChallengeError, P3PError, P3PNetworkError
 
 try:
-    response = client.get(url)
-except MppChallengeError as err:
+    response = client.get(url, context=runtime_context)
+except P3PChallengeError as err:
     ...
-except MppNetworkError as err:
+except P3PNetworkError as err:
     ...
-except MppError as err:
+except P3PError as err:
     print(err.code, err.http_status, err.details)
-```
-
-## Grantex (AI Agent Authorization)
-
-```python
-from pinelabs-online_mpp_client import (
-    pinelabs-onlineclient, pinelabs-onlineclientConfig, GrantexConfig, JwksConfig,
-    check_payment_authorization, extract_spending_limit, has_scope, parse_scope,
-)
-
-client = pinelabs-onlineclient.create_verified(pinelabs-onlineclientConfig(
-    clientId="…", clientSecret="…",
-    grantex=GrantexConfig(
-        grantToken=grant_token,
-        jwks=JwksConfig(jwksUrl="https://grantex.dev/.well-known/jwks.json"),
-    ),
-))
-
-print(client.grant_claims)  # GrantTokenClaims(...)
 ```
 
 ## License

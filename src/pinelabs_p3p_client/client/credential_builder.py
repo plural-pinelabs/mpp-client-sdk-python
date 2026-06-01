@@ -3,20 +3,21 @@ from __future__ import annotations
 import time
 from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from ..types.challenge import Challenge, ChallengeRequest, Credential, CredentialPayload, Receipt, Settlement
+from ..types.payment import PaymentGateway, PaymentMethod
 from ..utils.base64url import decode_json, encode_json, is_base64_url
-from ..utils.errors import MppChallengeError
+from ..utils.errors import P3PChallengeError
 
 PAYMENT_HEADER_PREFIX = "Payment "
 
 
 def decode_challenge(www_authenticate_header: str) -> Challenge:
-    """Decode and validate a seller `WWW-Authenticate: Payment ...` challenge."""
+    """Decode and validate a server `WWW-Authenticate: Payment ...` challenge."""
     encoded = _extract_base64_payload(www_authenticate_header)
     if not encoded:
-        raise MppChallengeError("Invalid WWW-Authenticate header format", "")
+        raise P3PChallengeError("Invalid WWW-Authenticate header format", "")
     raw = decode_json(encoded)
     challenge = _dict_to_challenge(raw)
     validate_challenge(challenge)
@@ -27,9 +28,11 @@ def build_credential(
     challenge: Challenge,
     agent_id: str,
     token: str,
+    payment_method: PaymentMethod,
     customer_reference: Optional[str] = None,
+    mobile_number: Optional[str] = None,
 ) -> Credential:
-    """Build the buyer credential object that authorizes one seller debit attempt."""
+    """Build the client credential object that authorizes one server debit attempt."""
     return Credential(
         challenge=challenge,
         source=agent_id,
@@ -37,22 +40,26 @@ def build_credential(
             type="token",
             token=token,
             customer_reference=str(customer_reference or "").strip() or None,
+            mobile_number=str(mobile_number or "").strip() or None,
+            payment_method=payment_method,
         ),
     )
 
 
 def encode_credential_header(credential: Credential) -> str:
-    """Encode a credential as an `Authorization: Payment <base64url>` header value."""
+    """Encode a credential as a `Payment <base64url>` value for `P3P-Credential`."""
     credential_payload = {"type": credential.payload.type, "token": credential.payload.token}
     if credential.payload.customer_reference:
         credential_payload["customer_reference"] = credential.payload.customer_reference
+    if credential.payload.mobile_number:
+        credential_payload["mobile_number"] = credential.payload.mobile_number
+    credential_payload["payment_method"] = _payment_method_value(credential.payload.payment_method)
     payload = {
         "challenge": {
             "id": credential.challenge.id,
             "realm": credential.challenge.realm,
-            "method": credential.challenge.method,
             "intent": credential.challenge.intent,
-            "request": asdict(credential.challenge.request),
+            "request": _challenge_request_to_dict(credential.challenge.request),
             "expires": credential.challenge.expires,
         },
         "source": credential.source,
@@ -62,15 +69,16 @@ def encode_credential_header(credential: Credential) -> str:
 
 
 def decode_receipt(payment_receipt_header: str) -> Receipt:
-    """Decode a seller `Payment-Receipt` header into a typed receipt."""
+    """Decode a server `Payment-Receipt` header into a typed receipt."""
     encoded = _extract_base64_payload(payment_receipt_header)
     if not encoded:
         raise ValueError("Invalid Payment-Receipt header format")
     raw = decode_json(encoded)
     settlement = raw.get("settlement") or {}
+    payment_gateway = raw.get("paymentGateway", raw.get("payment_gateway"))
+    payment_method = raw.get("paymentMethod", raw.get("payment_method"))
     return Receipt(
         status=raw.get("status", "failure"),
-        method=raw.get("method", ""),
         timestamp=raw.get("timestamp", ""),
         reference=raw.get("reference", ""),
         challengeId=raw.get("challengeId", ""),
@@ -78,26 +86,25 @@ def decode_receipt(payment_receipt_header: str) -> Receipt:
             amount=settlement.get("amount", "0.00"),
             currency=settlement.get("currency", "INR"),
         ),
+        paymentGateway=_parse_payment_gateway(payment_gateway) if payment_gateway is not None else None,
+        paymentMethod=_parse_payment_method(payment_method) if payment_method is not None else None,
     )
 
 
 def validate_challenge(challenge: Challenge) -> None:
     """Validate that a decoded challenge is usable and not expired."""
     if not challenge.id:
-        raise MppChallengeError("Challenge missing id", "")
-    if challenge.method != "plural":
-        raise MppChallengeError(
-            f'Unsupported payment method: {challenge.method}. Expected "plural"',
-            challenge.id,
-        )
+        raise P3PChallengeError("Challenge missing id", "")
     if not challenge.request or not challenge.request.amount or not challenge.request.currency:
-        raise MppChallengeError("Challenge missing payment request details", challenge.id)
+        raise P3PChallengeError("Challenge missing payment request details", challenge.id)
+    if not challenge.request.availablePaymentMethods:
+        raise P3PChallengeError("Challenge missing available payment methods", challenge.id)
     try:
         expires_ms = _iso_to_epoch_ms(challenge.expires)
     except Exception as exc:
-        raise MppChallengeError("Challenge has expired", challenge.id) from exc
+        raise P3PChallengeError("Challenge has expired", challenge.id) from exc
     if expires_ms <= time.time() * 1000:
-        raise MppChallengeError("Challenge has expired", challenge.id)
+        raise P3PChallengeError("Challenge has expired", challenge.id)
 
 
 def extract_amount_paise(challenge: Challenge) -> int:
@@ -105,14 +112,26 @@ def extract_amount_paise(challenge: Challenge) -> int:
     try:
         major_units = float(challenge.request.amount)
     except (TypeError, ValueError) as exc:
-        raise MppChallengeError(
+        raise P3PChallengeError(
             f"Invalid challenge amount: {challenge.request.amount}", challenge.id
         ) from exc
     if major_units <= 0:
-        raise MppChallengeError(
+        raise P3PChallengeError(
             f"Invalid challenge amount: {challenge.request.amount}", challenge.id
         )
     return round(major_units * 100)
+
+
+def select_payment_method(challenge: Challenge, selected_payment_method: PaymentMethod) -> PaymentMethod:
+    """Return the client-selected method if it is accepted by the server challenge."""
+    accepted = [_payment_method_value(method) for method in challenge.request.availablePaymentMethods]
+    selected = _payment_method_value(selected_payment_method)
+    if selected not in accepted:
+        raise P3PChallengeError(
+            f"Selected payment method {selected} is not accepted by this server challenge",
+            challenge.id,
+        )
+    return selected_payment_method
 
 
 # ── Helpers ────────────────────────────────────────────────────────
@@ -130,13 +149,15 @@ def _dict_to_challenge(raw: Dict[str, Any]) -> Challenge:
     return Challenge(
         id=raw.get("id", ""),
         realm=raw.get("realm", ""),
-        method=raw.get("method", ""),
         intent=raw.get("intent", ""),
         request=ChallengeRequest(
             scheme=req.get("scheme", ""),
             amount=str(req.get("amount", "")),
             currency=req.get("currency", ""),
             resource=req.get("resource", ""),
+            availablePaymentMethods=_parse_payment_methods(
+                req.get("availablePaymentMethods", req.get("available_payment_methods"))
+            ),
         ),
         expires=raw.get("expires", ""),
     )
@@ -150,3 +171,37 @@ def _iso_to_epoch_ms(iso: str) -> float:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.timestamp() * 1000
+
+
+def _parse_payment_gateway(value: Any) -> Optional[PaymentGateway]:
+    if value is None:
+        return None
+    return PaymentGateway.PineLabsOnline if value == PaymentGateway.PineLabsOnline.value else value
+
+
+def _parse_payment_method(value: Any) -> PaymentMethod:
+    if value == PaymentMethod.UPI_RESERVE_PAY.value:
+        return PaymentMethod.UPI_RESERVE_PAY
+    if value == PaymentMethod.Crypto.value:
+        return PaymentMethod.Crypto
+    return value or ""
+
+
+def _parse_payment_methods(value: Any) -> List[PaymentMethod]:
+    if not isinstance(value, list):
+        return []
+    return [_parse_payment_method(item) for item in value]
+
+
+def _payment_method_value(value: Any) -> str:
+    return value.value if isinstance(value, PaymentMethod) else str(value or "")
+
+
+def _payment_method_values(values: Iterable[Any]) -> List[str]:
+    return [_payment_method_value(value) for value in values]
+
+
+def _challenge_request_to_dict(request: ChallengeRequest) -> Dict[str, Any]:
+    data = asdict(request)
+    data["availablePaymentMethods"] = _payment_method_values(request.availablePaymentMethods)
+    return data

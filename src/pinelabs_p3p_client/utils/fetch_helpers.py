@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 
-from ..types.config import MppLogger
+from ..types.config import P3PLogger
 
 DEFAULT_TIMEOUT_MS = 30_000
 DEFAULT_MAX_RETRIES = 3
@@ -48,7 +48,7 @@ def request_with_retry(
     content: Any = None,
     json: Any = None,
     timeout_ms: Optional[int] = None,
-    logger: Optional[MppLogger] = None,
+    logger: Optional[P3PLogger] = None,
     max_retries: Optional[int] = None,
     initial_retry_delay_ms: Optional[int] = None,
 ) -> httpx.Response:
@@ -139,7 +139,7 @@ def request_with_retry(
                 except Exception:
                     pass
             raise TimeoutError(
-                f"MPP request timed out after {timeout_ms or DEFAULT_TIMEOUT_MS}ms: {method} {url}"
+                f"P3P request timed out after {timeout_ms or DEFAULT_TIMEOUT_MS}ms: {method} {url}"
             ) from exc
 
         except httpx.HTTPError as exc:
@@ -168,5 +168,5 @@ def request_with_retry(
             raise
 
     raise RuntimeError(
-        f"MPP request failed after {effective_max} retries: {method} {url} — last error: {last_error}"
+        f"P3P request failed after {effective_max} retries: {method} {url} — last error: {last_error}"
     )

@@ -3,14 +3,14 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "plural-mpp-buyer-sdk"
+name = "pinelabs-p3p-client-sdk"
 version = "0.1.0"
-description = "Plural MPP Buyer SDK — x402 Machine Payments Protocol client for AI agents (Python)"
+description = "Pine Labs Online P3P Client SDK — x402 Pine Labs Online P3P client for AI agents (Python)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-authors = [{ name = "Plural" }]
-keywords = ["mpp", "x402", "payment", "buyer", "plural", "upi", "sbmd", "machine-payments"]
+authors = [{ name = "Pine Labs Online" }]
+keywords = ["mpp", "x402", "payment", "client", "upi", "sbmd", "machine-payments"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -37,4 +37,4 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-plural_mpp_buyer = ["py.typed"]
+pinelabs_p3p_client = ["py.typed"]

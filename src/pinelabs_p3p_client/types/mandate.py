@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
+from .payment import PaymentMethod
+
 
 @dataclass
 class Amount:
@@ -25,7 +27,7 @@ class MandateChallenge:
 
 @dataclass
 class Mandate:
-    """Normalized mandate/pre-authorization response returned by the MPP service."""
+    """Normalized mandate/pre-authorization response returned by the P3P service."""
 
     mandate_id: str
     object: str
@@ -51,20 +53,20 @@ class Mandate:
 
 @dataclass
 class CreateMandateOptions:
-    """Input for `buyer.methods.create_mandate`.
+    """Input for `client.methods.create_mandate`.
 
     The SDK maps this to `POST /mpp/v1/pre-authorize`. `customerReference`
     is preferred; if absent the SDK falls back to `customerId` and then the
     normalized mobile number for local compatibility.
     """
 
-    mobileNumber: str
-    amount: Amount
+    mobileNumber: Optional[str] = None
+    amount: Optional[Amount] = None
     customerReference: Optional[str] = None
     customerId: Optional[str] = None
     description: Optional[str] = None
     metadata: Optional[Dict[str, str]] = None
     expiry: Optional[str] = None
     idempotencyKey: Optional[str] = None
-    paymentType: str = "SBMD"
+    paymentMethod: Optional[PaymentMethod] = None
     validityInDays: int = 7

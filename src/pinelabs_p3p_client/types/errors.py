@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Any, Dict, Optional
 
 
-class MppErrorCode(str, Enum):
+class P3PErrorCode(str, Enum):
     VALIDATION_FAILED = "MPP_VALIDATION_FAILED"
     AUTHENTICATION_FAILED = "MPP_AUTHENTICATION_FAILED"
     AGENT_NOT_AUTHORIZED = "MPP_AGENT_NOT_AUTHORIZED"
@@ -25,7 +25,7 @@ class MppErrorCode(str, Enum):
 
 
 @dataclass
-class MppErrorDetails:
+class P3PErrorDetails:
     source: str
     step: str
     reason: str
@@ -33,5 +33,5 @@ class MppErrorDetails:
 
 
 @dataclass
-class MppErrorResponse:
+class P3PErrorResponse:
     error: Dict[str, Any]

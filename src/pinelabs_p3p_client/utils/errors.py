@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 
-class MppError(Exception):
+class P3PError(Exception):
     def __init__(
         self,
         code: str,
@@ -17,8 +17,16 @@ class MppError(Exception):
         self.details = details
 
     @classmethod
-    def from_response(cls, status: int, body: Dict[str, Any]) -> "MppError":
-        err = body.get("error") or {}
+    def from_response(cls, status: int, body: Dict[str, Any]) -> "P3PError":
+        raw_error = body.get("error")
+        if isinstance(raw_error, str):
+            return cls(
+                body.get("code", "MPP_ERROR"),
+                raw_error,
+                status,
+                body.get("additional_error_details"),
+            )
+        err = raw_error if isinstance(raw_error, dict) else body
         return cls(
             err.get("code", "MPP_INTERNAL_ERROR"),
             err.get("message", f"HTTP {status}"),
@@ -36,13 +44,13 @@ class MppError(Exception):
         }
 
 
-class MppNetworkError(Exception):
+class P3PNetworkError(Exception):
     def __init__(self, message: str, cause: Optional[BaseException] = None) -> None:
         super().__init__(message)
         self.cause = cause
 
 
-class MppChallengeError(Exception):
+class P3PChallengeError(Exception):
     def __init__(self, message: str, challenge_id: str) -> None:
         super().__init__(message)
         self.challenge_id = challenge_id

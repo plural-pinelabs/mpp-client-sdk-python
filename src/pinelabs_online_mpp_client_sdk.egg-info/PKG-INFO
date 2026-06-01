@@ -1,0 +1,125 @@
+Metadata-Version: 2.4
+Name: pinelabs-online-mpp-client-sdk
+Version: 0.1.3
+Summary: Plural P3P Buyer SDK — x402 Plural P3P client for AI agents (Python)
+Author: Plural
+License: MIT
+Keywords: mpp,x402,payment,buyer,plural,upi,sbmd,machine-payments
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Typing :: Typed
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: httpx>=0.27
+Provides-Extra: dev
+Requires-Dist: pytest>=7; extra == "dev"
+
+# Pine Labs Online P3P Buyer SDK (Python)
+
+Python SDK for Pine Labs Online P3P buyer clients. It mirrors
+`@pine-labs-online/p3p-buyer-sdk`, intercepts HTTP 402 Payment Required
+responses, creates customer-scoped P3P payment credentials, and retries paid
+requests.
+
+## Installation
+
+```bash
+pip install pinelabs-p3p-buyer-sdk
+```
+
+Import module: `pinelabs_p3p_buyer`. Requires Python 3.9 or newer.
+
+## Quick Start
+
+```python
+from pinelabs_p3p_buyer import (
+    BuyerRuntimeContext,
+    P3PEnvironment,
+    PaymentGateway,
+    PaymentMethod,
+    PluralBuyer,
+    PluralBuyerConfig,
+)
+
+buyer = PluralBuyer.create(PluralBuyerConfig(
+    env=P3PEnvironment.SANDBOX,
+    paymentGateway=PaymentGateway.PineLabsOnline,
+    selectedPaymentMethod=PaymentMethod.UpiSbmd,
+))
+
+response = buyer.get(
+    "https://seller.example.com/api/premium",
+    context=BuyerRuntimeContext(
+        customerKey="customer-api-token",
+        customerReference="9876543210",
+        mobileNumber="9876543210",
+    ),
+)
+print(response.json())
+buyer.close()
+```
+
+Customer identity is runtime context, not static SDK config. This lets one
+buyer instance safely serve many customers.
+
+## 402 Flow
+
+1. Your code calls `buyer.get(url, context=...)`.
+2. The seller returns `HTTP 402` with `WWW-Authenticate: Payment <challenge>`.
+3. The SDK decodes the challenge and validates `paymentGateway == "PINE LABS ONLINE"`.
+4. The SDK calls `POST /api/v1/customer/mpp/token` with:
+   - `X-Customer-Key: <context.customerKey>`
+   - `customer.mobile_number`
+   - `challenge_id`
+   - `payment_amount.value` in minor units
+5. The SDK retries the seller with `P3P-Credential: Payment <credential>`.
+6. The seller captures the payment and may return `Payment-Receipt`.
+
+## Direct Token API
+
+```python
+from pinelabs_p3p_buyer import Amount, CreateTokenOptions, PaymentMethod
+
+token = buyer.methods.create_token(CreateTokenOptions(
+    customerKey="customer-api-token",
+    customerReference="9876543210",
+    mobileNumber="9876543210",
+    challengeId="ch_...",
+    paymentAmount=Amount(value=50000, currency="INR"),
+    paymentMethod=PaymentMethod.UpiSbmd,
+))
+```
+
+The buyer SDK no longer creates mandates. Mandate/pre-authorization creation
+is handled by the seller SDK.
+
+## Supported Methods
+
+- `PaymentMethod.UpiSbmd` -> `"SBMD"` / UPI ReservePay
+- `PaymentMethod.Crypto` -> `"CRYPTO"`
+
+## Error Handling
+
+```python
+from pinelabs_p3p_buyer import P3PChallengeError, P3PError, P3PNetworkError
+
+try:
+    response = buyer.get(url, context=runtime_context)
+except P3PChallengeError as err:
+    ...
+except P3PNetworkError as err:
+    ...
+except P3PError as err:
+    print(err.code, err.http_status, err.details)
+```
+
+## License
+
+MIT

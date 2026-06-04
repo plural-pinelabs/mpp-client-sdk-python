@@ -44,7 +44,7 @@ class _ClientTransport(httpx.BaseTransport):
                                     "amount": "100.00",
                                     "currency": "INR",
                                     "resource": "/api/premium",
-                                    "availablePaymentMethods": ["SBMD", "CRYPTO"],
+                                    "availablePaymentMethods": ["RESERVE_PAY", "CRYPTO"],
                                 },
                                 "expires": "2030-01-01T00:00:00Z",
                             }
@@ -60,7 +60,7 @@ class _ClientTransport(httpx.BaseTransport):
                     "data": {
                         "payment_token": "tok_runtime",
                         "expires_in": 300,
-                        "type": "SBMD",
+                        "type": "RESERVE_PAY",
                         "payment_method_reference_id": "auth_runtime",
                     }
                 },
@@ -84,7 +84,7 @@ class _ClientTransport(httpx.BaseTransport):
                     "data": {
                         "payment_token": "tok_client_credentials",
                         "expires_in": 300,
-                        "type": "SBMD",
+                        "type": "RESERVE_PAY",
                         "payment_method_reference_id": "auth_client_credentials",
                     }
                 },
@@ -111,6 +111,8 @@ def test_client_uses_runtime_context_customer_token_endpoint_and_p3p_header(monk
         PineLabsOnlineClientConfig(
             selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
             customerAuthMode=P3PCustomerAuthMode.CustomerKey,
+            clientId="client-client",
+            clientSecret="client-secret",
             env=P3PEnvironment.SANDBOX,
         )
     )
@@ -131,9 +133,9 @@ def test_client_uses_runtime_context_customer_token_endpoint_and_p3p_header(monk
     token_body = json.loads(token_request.content.decode() or "{}")
     assert token_request.url.host == "api-staging.pluralonline.com"
     assert token_request.headers["X-Customer-Key"] == "ck_test"
-    assert "Authorization" not in token_request.headers
+    assert token_request.headers["Authorization"] == "Bearer client-access-token"
     assert token_body == {
-        "payment_method": "SBMD",
+        "payment_method": "RESERVE_PAY",
         "customer": {"mobile_number": "9876543210"},
         "challenge_id": "ch_runtime",
         "payment_amount": {"value": 10000, "currency": "INR"},
@@ -149,7 +151,7 @@ def test_client_uses_runtime_context_customer_token_endpoint_and_p3p_header(monk
     assert "paymentGateway" not in credential["challenge"]
     assert credential["payload"]["customer_reference"] == "9876543210"
     assert credential["payload"]["mobile_number"] == "9876543210"
-    assert credential["payload"]["payment_method"] == "SBMD"
+    assert credential["payload"]["payment_method"] == "RESERVE_PAY"
 
 
 def test_client_defaults_to_client_credentials_token_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -191,11 +193,42 @@ def test_client_defaults_to_client_credentials_token_endpoint(monkeypatch: pytes
     assert token_request.headers["Authorization"] == "Bearer client-access-token"
     assert "X-Customer-Key" not in token_request.headers
     assert token_body == {
-        "payment_method": "SBMD",
+        "payment_method": "RESERVE_PAY",
         "customer": {"merchant_customer_reference": "cust-ref-default"},
         "challenge_id": "ch_default",
         "payment_amount": {"value": 100, "currency": "INR"},
     }
+
+
+def test_client_uses_separate_http_clients_for_internal_and_resource_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    created_kwargs: list[dict] = []
+
+    class DummyClient:
+        def __init__(self, *args, **kwargs):
+            created_kwargs.append(dict(kwargs))
+
+        def request(self, *args, **kwargs):
+            raise AssertionError("request should not be called in this constructor test")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("pinelabs_p3p_client.client.pine_labs_online_client.httpx.Client", DummyClient)
+
+    client = PineLabsOnlineClient.create(
+        PineLabsOnlineClientConfig(
+            selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
+            env=P3PEnvironment.SANDBOX,
+            clientId="cid",
+            clientSecret="secret",
+            requestTimeoutMs=10_000,
+        )
+    )
+    client.close()
+
+    assert len(created_kwargs) == 2
+    assert created_kwargs[0] == {}
+    assert created_kwargs[1] == {}
 
 
 def test_client_credentials_default_requires_client_credentials() -> None:
@@ -216,6 +249,8 @@ def test_customer_key_mode_remains_explicit(monkeypatch: pytest.MonkeyPatch) -> 
         PineLabsOnlineClientConfig(
             selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
             customerAuthMode=P3PCustomerAuthMode.CustomerKey,
+            clientId="client-client",
+            clientSecret="client-secret",
             env=P3PEnvironment.SANDBOX,
         )
     )
@@ -236,9 +271,9 @@ def test_customer_key_mode_remains_explicit(monkeypatch: pytest.MonkeyPatch) -> 
     token_body = json.loads(token_request.content.decode() or "{}")
     assert token_request.url.host == "api-staging.pluralonline.com"
     assert token_request.headers["X-Customer-Key"] == "ck_test"
-    assert "Authorization" not in token_request.headers
+    assert token_request.headers["Authorization"] == "Bearer client-access-token"
     assert token_body == {
-        "payment_method": "SBMD",
+        "payment_method": "RESERVE_PAY",
         "customer": {"mobile_number": "9876543210"},
         "challenge_id": "ch_customer_key",
         "payment_amount": {"value": 100, "currency": "INR"},
@@ -253,6 +288,8 @@ def test_customer_key_mode_defaults_to_production_customer_token_host(monkeypatc
         PineLabsOnlineClientConfig(
             selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
             customerAuthMode=P3PCustomerAuthMode.CustomerKey,
+            clientId="client-client",
+            clientSecret="client-secret",
         )
     )
     try:
@@ -268,8 +305,16 @@ def test_customer_key_mode_defaults_to_production_customer_token_host(monkeypatc
         client.close()
 
     assert token.token == "tok_runtime"
+    auth_request = next(req for req in transport.requests if req.url.path == "/api/auth/v1/token")
+    auth_body = json.loads(auth_request.content.decode() or "{}")
+    assert auth_body == {
+        "grant_type": "client_credentials",
+        "client_id": "client-client",
+        "client_secret": "client-secret",
+    }
     token_request = next(req for req in transport.requests if req.url.path == "/api/v1/customer/mpp/token")
     assert token_request.url.host == "api.pluralonline.com"
+    assert token_request.headers["Authorization"] == "Bearer client-access-token"
 
 
 def test_client_requires_runtime_context_for_auto_payment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -279,6 +324,8 @@ def test_client_requires_runtime_context_for_auto_payment(monkeypatch: pytest.Mo
         PineLabsOnlineClientConfig(
             selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
             customerAuthMode=P3PCustomerAuthMode.CustomerKey,
+            clientId="client-client",
+            clientSecret="client-secret",
             env=P3PEnvironment.SANDBOX,
         )
     )

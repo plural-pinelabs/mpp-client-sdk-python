@@ -39,8 +39,8 @@ class PineLabsOnlineClientConfig:
     selectedPaymentMethod: PaymentMethod
     env: Optional[str] = P3PEnvironment.PRODUCTION
     customerAuthMode: Optional[P3PCustomerAuthMode] = P3PCustomerAuthMode.ClientCredentials
-    clientId: Optional[str] = None
-    clientSecret: Optional[str] = None
+    clientId: str = ""
+    clientSecret: str = ""
     autoHandlePayment: bool = True
     onChallenge: Optional[Callable[[Challenge], Any]] = None
     onPaymentComplete: Optional[Callable[[Receipt], Any]] = None

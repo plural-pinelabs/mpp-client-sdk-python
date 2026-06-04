@@ -22,10 +22,8 @@ def normalize_mandate_mobile_number(value: str) -> str:
 def validate_config(config: PineLabsOnlineClientConfig) -> None:
     if not is_supported_payment_method(config.selectedPaymentMethod):
         raise ValueError("PineLabsOnlineClientConfig: selectedPaymentMethod must be a supported payment method")
-    customer_auth_mode = resolve_customer_auth_mode(config)
-    if customer_auth_mode == P3PCustomerAuthMode.ClientCredentials:
-        if not _required_text(config.clientId) or not _required_text(config.clientSecret):
-            raise ValueError("PineLabsOnlineClientConfig: clientId and clientSecret are required when customerAuthMode is CLIENT_CREDENTIALS")
+    if not _required_text(config.clientId) or not _required_text(config.clientSecret):
+        raise ValueError("PineLabsOnlineClientConfig: clientId and clientSecret are required")
     if config.env is not None:
         resolve_p3p_base_url(config.env)
     if config.requestTimeoutMs is not None and (not isinstance(config.requestTimeoutMs, int) or config.requestTimeoutMs <= 0):

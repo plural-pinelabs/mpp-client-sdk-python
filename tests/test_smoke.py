@@ -28,6 +28,7 @@ from pinelabs_p3p_server import (
     PineLabsOnlineServerConfig,
 )
 from pinelabs_p3p_server import Amount as ServerAmount
+from pinelabs_p3p_client.client.credential_builder import encode_json
 
 def _server_config(base_url: str) -> PineLabsOnlineServerConfig:
     return PineLabsOnlineServerConfig(
@@ -45,6 +46,8 @@ def _client_config(base_url: str) -> PineLabsOnlineClientConfig:
     return PineLabsOnlineClientConfig(
         selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
         customerAuthMode=P3PCustomerAuthMode.CustomerKey,
+        clientId="client-id",
+        clientSecret="client-secret",
         env=base_url,
         maxRetries=0,
     )
@@ -95,7 +98,7 @@ class _MockTransport(httpx.BaseTransport):
                     "data": {
                         "payment_token": "MPP_TOK_smoke",
                         "expires_in": 300,
-                        "payment_method": body.get("payment_method", "SBMD"),
+                        "payment_method": body.get("payment_method", "RESERVE_PAY"),
                         "payment_method_reference_id": "mnd_test",
                     }
                 },
@@ -109,7 +112,8 @@ class _MockTransport(httpx.BaseTransport):
                 200,
                 json={
                     "data": {
-                        "type": "SBMD",
+                        "type": "RESERVE_PAY",
+                        "payment_method": "RESERVE_PAY",
                         "payment_method_reference_id": "mnd_test",
                         "payment_id": "pay_1",
                         "merchant_payment_debit_reference": request.headers.get("Idempotency-Key"),
@@ -233,14 +237,118 @@ def test_end_to_end_402_flow(monkeypatch: pytest.MonkeyPatch) -> None:
         token_body = json.loads(token_request.content.decode() or "{}")
         assert token_request.url.host == "api.test"
         assert debit_body["customer"] == {"mobile_number": "9876543210"}
-        assert debit_body["payment_method"] == "SBMD"
+        assert debit_body["payment_method"] == "RESERVE_PAY"
         assert debit_body["payment_amount"] == {"value": 15000, "currency": "INR"}
         assert debit_body["challenge_id"] == token_body["challenge_id"]
-        assert token_body["payment_method"] == "SBMD"
+        assert token_body["payment_method"] == "RESERVE_PAY"
         assert token_request.headers["X-Customer-Key"] == "ck_smoke"
-        assert "Authorization" not in token_request.headers
+        assert token_request.headers["Authorization"] == "Bearer server-access-token"
         assert token_body["customer"] == {"mobile_number": "9876543210"}
         assert token_body["challenge_id"]
         assert token_body["payment_amount"] == {"value": 15000, "currency": "INR"}
     finally:
         client.close()
+
+
+def test_protected_resource_call_is_not_bounded_by_sdk_request_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    internal_timeouts: list[float | None] = []
+    resource_timeouts: list[float | None] = []
+
+    class FakeInternalClient:
+        def request(self, method, url, **kwargs):  # noqa: ANN001, ANN202
+            internal_timeouts.append(kwargs.get("timeout"))
+            if url.endswith("/api/auth/v1/token"):
+                return httpx.Response(
+                    200,
+                    json={"data": {"access_token": "client-access-token", "expires_in": 300}},
+                )
+            if url.endswith("/api/v1/customer/mpp/token"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "payment_token": "tok_runtime",
+                            "expires_in": 300,
+                            "type": "RESERVE_PAY",
+                            "payment_method_reference_id": "auth_runtime",
+                        }
+                    },
+                )
+            raise AssertionError(f"unexpected internal url {url}")
+
+        def close(self):  # noqa: ANN201
+            pass
+
+    class FakeResourceClient:
+        def __init__(self) -> None:
+            self._attempt = 0
+
+        def request(self, method, url, **kwargs):  # noqa: ANN001, ANN202
+            resource_timeouts.append(kwargs.get("timeout"))
+            self._attempt += 1
+            if self._attempt == 1:
+                return httpx.Response(
+                    402,
+                    json={"status": 402, "challengeId": "ch_runtime"},
+                    headers={
+                        "WWW-Authenticate": "Payment "
+                        + encode_json(
+                            {
+                                "id": "ch_runtime",
+                                "realm": "Pine Labs Online P3P",
+                                "paymentGateway": "PINE LABS ONLINE",
+                                "intent": "charge",
+                                "request": {
+                                    "scheme": "exact",
+                                    "amount": "100.00",
+                                    "currency": "INR",
+                                    "resource": "/api/premium",
+                                    "availablePaymentMethods": ["RESERVE_PAY", "CRYPTO"],
+                                },
+                                "expires": "2030-01-01T00:00:00Z",
+                            }
+                        ),
+                    },
+                )
+            return httpx.Response(200, json={"ok": True}, headers={"Payment-Receipt": ""})
+
+        def close(self):  # noqa: ANN201
+            pass
+
+    fake_internal = FakeInternalClient()
+    fake_resource = FakeResourceClient()
+    created = 0
+
+    def _patched_client(*args, **kwargs):  # noqa: ANN001, ANN202
+        nonlocal created
+        created += 1
+        return fake_internal if created == 1 else fake_resource
+
+    monkeypatch.setattr("pinelabs_p3p_client.client.pine_labs_online_client.httpx.Client", _patched_client)
+
+    client = PineLabsOnlineClient.create(
+        PineLabsOnlineClientConfig(
+            selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
+            customerAuthMode=P3PCustomerAuthMode.CustomerKey,
+            clientId="client-id",
+            clientSecret="client-secret",
+            env=P3PEnvironment.SANDBOX,
+            requestTimeoutMs=10_000,
+            maxRetries=0,
+        )
+    )
+    try:
+        response = client.get(
+            "https://server.test/api/premium",
+            context=ClientRuntimeContext(
+                customerKey="ck_test",
+                customerReference="9876543210",
+                mobileNumber="9876543210",
+            ),
+        )
+    finally:
+        client.close()
+
+    assert response.status_code == 200
+    assert internal_timeouts == [10.0, 10.0]
+    assert resource_timeouts == [None, None]

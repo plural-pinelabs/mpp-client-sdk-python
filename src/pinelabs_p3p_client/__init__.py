@@ -1,4 +1,4 @@
-"""Pine Labs Online P3P Client SDK — Python port of `@pine-labs-online/p3p-client-sdk`.
+"""Pine Labs Online P3P Client SDK — Python port of `p3p-client-sdk`.
 
 Automatically intercepts HTTP 402 Payment Required responses, constructs
 P3P payment credentials, and completes the payment flow.
@@ -66,4 +66,4 @@ __all__ = [
     "validate_challenge",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.1.5"

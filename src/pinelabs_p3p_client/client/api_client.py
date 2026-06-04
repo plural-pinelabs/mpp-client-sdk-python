@@ -73,7 +73,7 @@ class ApiClient:
         logger: Optional[P3PLogger] = None,
         max_retries: Optional[int] = None,
         initial_retry_delay_ms: Optional[int] = None,
-        auth: Optional[AuthManager] = None,
+        auth: AuthManager | None = None,
     ) -> None:
         self._config = config
         self._base_url = base_url.rstrip("/")
@@ -117,17 +117,18 @@ class ApiClient:
         return _parse_token(data)
 
     def _auth_headers(self, customer_auth_mode: P3PCustomerAuthMode, customer_key: Optional[str]) -> Dict[str, str]:
-        if customer_auth_mode == P3PCustomerAuthMode.CustomerKey:
-            value = str(customer_key or "").strip()
-            return {"X-Customer-Key": value} if value else {}
-
         if self._auth is None:
             raise P3PError(
                 "P3P_AUTHENTICATION_FAILED",
-                "Client credentials auth manager is not configured",
+                "Auth manager is not configured",
                 500,
             )
-        return {"Authorization": f"Bearer {self._auth.get_access_token()}"}
+        headers = {"Authorization": f"Bearer {self._auth.get_access_token()}"}
+        if customer_auth_mode == P3PCustomerAuthMode.CustomerKey:
+            value = str(customer_key or "").strip()
+            if value:
+                headers["X-Customer-Key"] = value
+        return headers
 
     # ── Internal ────────────────────────────────────────────────
 
@@ -213,7 +214,7 @@ def _parse_token(data: Dict[str, Any]) -> Token:
             charges_made=usage.get("charges_made", 0),
         ),
         expires_in=int(data.get("expires_in", 0) or 0),
-        metadata=data.get("metadata") or {"type": data.get("type", "SBMD")},
+        metadata=data.get("metadata") or {"type": data.get("type", "RESERVE_PAY")},
         created_at=data.get("created_at", ""),
         raw=data,
     )

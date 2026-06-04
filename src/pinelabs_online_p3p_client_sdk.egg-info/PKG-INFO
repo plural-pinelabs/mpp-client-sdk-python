@@ -1,7 +1,30 @@
+Metadata-Version: 2.4
+Name: pinelabs-online-p3p-client-sdk
+Version: 0.1.4
+Summary: Pine Labs Online P3P Client SDK — x402 Pine Labs Online P3P client for AI agents (Python)
+Author: Pine Labs Online
+License: MIT
+Keywords: mpp,x402,payment,client,upi,sbmd,machine-payments
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Typing :: Typed
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: httpx>=0.27
+Provides-Extra: dev
+Requires-Dist: pytest>=7; extra == "dev"
+
 # Pine Labs Online P3P Client SDK (Python)
 
 Python SDK for Pine Labs Online P3P client integrations. It mirrors
-`p3p-client-sdk`, intercepts HTTP 402 Payment Required
+`@pine-labs-online/p3p-client-sdk`, intercepts HTTP 402 Payment Required
 responses, creates customer-scoped P3P payment credentials, and retries paid
 requests.
 
@@ -26,7 +49,7 @@ from pinelabs_p3p_client import (
 
 client = PineLabsOnlineClient.create(PineLabsOnlineClientConfig(
     env=P3PEnvironment.SANDBOX,
-    selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
+    selectedPaymentMethod=PaymentMethod.RESERVE_PAY,
     clientId="client-client-id",
     clientSecret="client-client-secret",
 ))
@@ -53,9 +76,6 @@ For customer API-token flows, explicitly set
 `customerAuthMode=P3PCustomerAuthMode.CustomerKey` and pass `customerKey` plus
 `mobileNumber` in `ClientRuntimeContext`.
 
-Keep the client SDK instance long-lived in production. Auth tokens are cached
-per SDK instance.
-
 ## 402 Flow
 
 1. Your code calls `client.get(url, context=...)`.
@@ -63,7 +83,7 @@ per SDK instance.
 3. The SDK decodes the challenge and validates amount, expiry, and accepted payment methods.
 4. The SDK creates a token:
    - default mode: `POST /mpp/v1/token` with `Authorization: Bearer <token>`
-   - customer-key mode: `POST /api/v1/customer/mpp/token` with `Authorization: Bearer <token>` and `X-Customer-Key`
+   - customer-key mode: `POST /api/v1/customer/mpp/token` with `X-Customer-Key`
    - `customer.merchant_customer_reference` and/or `customer.mobile_number`
    - `challenge_id`
    - `payment_amount.value` in minor units
@@ -80,7 +100,7 @@ token = client.methods.create_token(CreateTokenOptions(
     mobileNumber="9876543210",
     challengeId="ch_...",
     paymentAmount=Amount(value=50000, currency="INR"),
-    paymentMethod=PaymentMethod.UPI_RESERVE_PAY,
+    paymentMethod=PaymentMethod.RESERVE_PAY,
 ))
 ```
 
@@ -94,27 +114,14 @@ from pinelabs_p3p_client import P3PCustomerAuthMode
 
 customer_key_client = PineLabsOnlineClient.create(PineLabsOnlineClientConfig(
     env=P3PEnvironment.SANDBOX,
-    selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
+    selectedPaymentMethod=PaymentMethod.RESERVE_PAY,
     customerAuthMode=P3PCustomerAuthMode.CustomerKey,
-    clientId="client-client-id",
-    clientSecret="client-client-secret",
 ))
 ```
 
-Timeout and retry settings (`requestTimeoutMs`, `maxRetries`,
-`initialRetryDelayMs`) apply to internal P3P calls only. The protected
-resource request itself uses the integrator's own HTTP timeout policy.
-
-Environment defaults:
-
-| Env | URL | Timeout | Retries | Initial retry delay |
-|---|---|---:|---:|---:|
-| `P3PEnvironment.SANDBOX` | `https://pluraluat.v2.pinepg.in` | 60000 ms | 3 | 500 ms |
-| `P3PEnvironment.PRODUCTION` | `https://api.pluralpay.in` | 45000 ms | 3 | 500 ms |
-
 ## Supported Methods
 
-- `PaymentMethod.UPI_RESERVE_PAY` -> `"RESERVE_PAY"` / UPI ReservePay
+- `PaymentMethod.RESERVE_PAY` -> `"RESERVE_PAY"` / UPI ReservePay
 - `PaymentMethod.Crypto` -> `"CRYPTO"`
 
 ## Error Handling

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import httpx
 
-from ..config.environments import resolve_p3p_base_url
+from ..config.environments import resolve_p3p_base_url, with_p3p_environment_defaults
 from ..types.challenge import Challenge, Credential
-from ..types.config import ClientRuntimeContext, P3PCustomerAuthMode, PineLabsOnlineClientConfig
+from ..types.config import ClientRuntimeContext, PineLabsOnlineClientConfig
 from ..types.token import CreateTokenOptions, Token
-from ..utils.validation import resolve_customer_auth_mode, validate_config
+from ..utils.validation import validate_config
 from .api_client import ApiClient
 from .auth_manager import AuthManager
 from .fetch_interceptor import FetchInterceptor
@@ -39,11 +39,13 @@ class PineLabsOnlineClientInstance:
     def __init__(
         self,
         interceptor: FetchInterceptor,
-        http_client: httpx.Client,
+        resource_http_client: httpx.Client,
+        internal_http_client: httpx.Client,
         methods: ClientMethods,
     ) -> None:
         self._interceptor = interceptor
-        self._http = http_client
+        self._http = resource_http_client
+        self._internal_http = internal_http_client
         self.methods = methods
 
     # ── Intercepting HTTP API ───────────────────────────────────
@@ -106,6 +108,8 @@ class PineLabsOnlineClientInstance:
 
     def close(self) -> None:
         self._http.close()
+        if self._internal_http is not self._http:
+            self._internal_http.close()
 
     def __enter__(self) -> "PineLabsOnlineClientInstance":
         return self
@@ -121,35 +125,32 @@ class PineLabsOnlineClient:
     def create(config: PineLabsOnlineClientConfig) -> PineLabsOnlineClientInstance:
         """Create a client SDK instance from `PineLabsOnlineClientConfig`."""
         validate_config(config)
+        resolved_config = with_p3p_environment_defaults(config)
 
-        request_timeout = (config.requestTimeoutMs / 1000.0) if config.requestTimeoutMs else None
-        http_client = httpx.Client(timeout=request_timeout)
+        internal_http_client = httpx.Client()
+        resource_http_client = httpx.Client()
 
-        auth = (
-            AuthManager(
-                config,
-                resolve_p3p_base_url(config.env),
-                http_client,
-                config.requestTimeoutMs,
-                config.logger,
-                config.maxRetries,
-                config.initialRetryDelayMs,
-            )
-            if resolve_customer_auth_mode(config) == P3PCustomerAuthMode.ClientCredentials
-            else None
+        auth = AuthManager(
+            resolved_config,
+            resolve_p3p_base_url(resolved_config.env),
+            internal_http_client,
+            resolved_config.requestTimeoutMs,
+            resolved_config.logger,
+            resolved_config.maxRetries,
+            resolved_config.initialRetryDelayMs,
         )
 
         api_client = ApiClient(
-            config,
-            resolve_p3p_base_url(config.env),
-            http_client,
-            config.requestTimeoutMs,
-            config.logger,
-            config.maxRetries,
-            config.initialRetryDelayMs,
+            resolved_config,
+            resolve_p3p_base_url(resolved_config.env),
+            internal_http_client,
+            resolved_config.requestTimeoutMs,
+            resolved_config.logger,
+            resolved_config.maxRetries,
+            resolved_config.initialRetryDelayMs,
             auth,
         )
 
-        interceptor = FetchInterceptor(config, api_client, http_client)
+        interceptor = FetchInterceptor(resolved_config, api_client, resource_http_client)
         methods = ClientMethods(api_client)
-        return PineLabsOnlineClientInstance(interceptor, http_client, methods)
+        return PineLabsOnlineClientInstance(interceptor, resource_http_client, internal_http_client, methods)

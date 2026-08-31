@@ -1,7 +1,11 @@
 from .challenge import Challenge, ChallengeRequest, Credential, CredentialPayload, Receipt, Settlement
 from .config import (
+    ClientGrantexConfig,
     ClientMethods,
     ClientRuntimeContext,
+    GRANTEX_TOKEN_HEADER,
+    GrantexVerificationResult,
+    GrantexVerifierLike,
     P3PCustomerAuthMode,
     P3PLogger,
     PineLabsOnlineClientConfig,
@@ -15,6 +19,7 @@ from .token import CreateTokenOptions, Token, TokenHold, TokenUsage, UsageLimits
 
 __all__ = [
     "Amount",
+    "ClientGrantexConfig",
     "ClientMethods",
     "ClientRuntimeContext",
     "Challenge",
@@ -22,6 +27,9 @@ __all__ = [
     "CreateTokenOptions",
     "Credential",
     "CredentialPayload",
+    "GRANTEX_TOKEN_HEADER",
+    "GrantexVerificationResult",
+    "GrantexVerifierLike",
     "P3PErrorCode",
     "P3PErrorDetails",
     "P3PErrorResponse",

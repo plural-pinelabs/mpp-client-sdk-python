@@ -8,6 +8,7 @@ from ..config.environments import P3PEnvironment
 from ..types.config import P3PLogger, PineLabsOnlineClientConfig
 from ..types.config import P3PCustomerAuthMode
 from ..types.mandate import Amount
+from ..types.payment import PaymentMethod
 from ..types.token import (
     CreateTokenOptions,
     Token,
@@ -37,15 +38,10 @@ def _payment_method_value(value: Any) -> str:
     return value.value if hasattr(value, "value") else str(value or "")
 
 
-def _customer_payload(customer_reference: str, mobile_number: str, customer_auth_mode: P3PCustomerAuthMode) -> Dict[str, str]:
+def _customer_payload(mobile_number: str, customer_auth_mode: P3PCustomerAuthMode) -> Dict[str, str]:
     if customer_auth_mode == P3PCustomerAuthMode.CustomerKey:
         return {"mobile_number": mobile_number}
-    payload: Dict[str, str] = {}
-    if customer_reference:
-        payload["merchant_customer_reference"] = customer_reference
-    if mobile_number:
-        payload["mobile_number"] = mobile_number
-    return payload
+    return {"mobile_number": mobile_number}
 
 
 def _amount_payload(amount: Amount) -> Dict[str, Any]:
@@ -95,8 +91,7 @@ class ApiClient:
         customer_auth_mode = resolve_customer_auth_mode(self._config)
         validate_create_token_options(options, customer_auth_mode)
 
-        payment_method = options.paymentMethod or self._config.selectedPaymentMethod
-        customer_reference = options.customerReference or options.customerId or ""
+        payment_method = options.paymentMethod
         mobile_number = options.mobileNumber or ""
         payment_amount = options.paymentAmount or Amount(
             value=options.usageLimits.maxAmount,
@@ -104,10 +99,13 @@ class ApiClient:
         )
         body: Dict[str, Any] = {
             "payment_method": _payment_method_value(payment_method),
-            "customer": _customer_payload(customer_reference, mobile_number, customer_auth_mode),
+            "customer": _customer_payload(mobile_number, customer_auth_mode),
             "challenge_id": options.challengeId,
             "payment_amount": _amount_payload(payment_amount),
         }
+        payment_method_reference_id = str(options.paymentMethodReferenceId or "").strip()
+        if payment_method_reference_id:
+            body["payment_method_reference_id"] = payment_method_reference_id
         headers = self._auth_headers(customer_auth_mode, options.customerKey)
 
         is_customer_key_mode = customer_auth_mode == P3PCustomerAuthMode.CustomerKey
@@ -145,6 +143,7 @@ class ApiClient:
         headers: Dict[str, str] = {
             "Accept": "application/json",
         }
+        headers["Merchant-ID"] = self._config.merchantId
         if extra_headers:
             headers.update(extra_headers)
 
@@ -189,14 +188,39 @@ def _parse_token(data: Dict[str, Any]) -> Token:
     usage = data.get("usage") or {}
     ul = data.get("usage_limits") or {}
     payment_token = data.get("payment_token") or data.get("token") or data.get("token_id", "")
-    authorization_id = data.get("payment_method_reference_id") or data.get("authorization_id") or data.get("mandate_id", "")
+    metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    authorization_id = (
+        data.get("payment_method_reference_id")
+        or data.get("authorization_id")
+        or data.get("authorizationId")
+        or data.get("mandate_id")
+        or data.get("mandateId")
+        or data.get("pre_authorization_id")
+        or data.get("preAuthorizationId")
+        or data.get("order_id")
+        or data.get("orderId")
+        or metadata.get("payment_method_reference_id")
+        or metadata.get("authorization_id")
+        or metadata.get("authorizationId")
+        or metadata.get("pre_authorization_id")
+        or metadata.get("preAuthorizationId")
+        or metadata.get("external_subscription_id")
+        or ""
+    )
+    payment_amount = data.get("payment_amount") or data.get("paymentAmount")
     return Token(
         token_id=payment_token,
         object=data.get("object", "p3p_payment_token"),
         customer_reference=customer.get("merchant_customer_reference", data.get("merchant_customer_reference", data.get("customer_reference", data.get("customer_id", "")))),
         customer_id=customer.get("customer_id", data.get("customer_id", data.get("customer_reference", ""))),
+        mobile_number=customer.get("mobile_number", data.get("mobile_number")),
         mandate_id=authorization_id,
         token=payment_token,
+        payment_method=_parse_payment_method(data.get("payment_method", data.get("type"))),
+        payment_amount=Amount(
+            value=_amount_int(payment_amount.get("value", 0)),
+            currency=payment_amount.get("currency", "INR"),
+        ) if isinstance(payment_amount, dict) else None,
         challenge_id=data.get("challenge_id"),
         hold=TokenHold(
             amount=hold.get("amount", 0),
@@ -218,3 +242,17 @@ def _parse_token(data: Dict[str, Any]) -> Token:
         created_at=data.get("created_at", ""),
         raw=data,
     )
+
+
+def _parse_payment_method(value: Any) -> Optional[PaymentMethod]:
+    if value == PaymentMethod.RESERVE_PAY.value:
+        return PaymentMethod.RESERVE_PAY
+    if value == PaymentMethod.OTM.value:
+        return PaymentMethod.OTM
+    if value == PaymentMethod.CARD.value:
+        return PaymentMethod.CARD
+    if value == PaymentMethod.CREDIT_EMI.value:
+        return PaymentMethod.CREDIT_EMI
+    if value == PaymentMethod.Crypto.value:
+        return PaymentMethod.Crypto
+    return None

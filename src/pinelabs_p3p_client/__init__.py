@@ -15,14 +15,19 @@ from .client import (
     validate_challenge,
 )
 from .config.environments import DEFAULT_BASE_URL, P3PEnvironment
+from .grantex import GrantTokenVerifier, has_grant_scope, missing_grant_scopes
 from .types import (
     Amount,
+    ClientGrantexConfig,
     ClientRuntimeContext,
     Challenge,
     ChallengeRequest,
     CreateTokenOptions,
     Credential,
     CredentialPayload,
+    GRANTEX_TOKEN_HEADER,
+    GrantexVerificationResult,
+    GrantexVerifierLike,
     P3PCustomerAuthMode,
     P3PErrorCode,
     PaymentGateway,
@@ -36,6 +41,7 @@ from .utils.errors import P3PChallengeError, P3PError, P3PNetworkError
 
 __all__ = [
     "Amount",
+    "ClientGrantexConfig",
     "ClientRuntimeContext",
     "Challenge",
     "ChallengeRequest",
@@ -43,6 +49,10 @@ __all__ = [
     "Credential",
     "CredentialPayload",
     "DEFAULT_BASE_URL",
+    "GRANTEX_TOKEN_HEADER",
+    "GrantTokenVerifier",
+    "GrantexVerificationResult",
+    "GrantexVerifierLike",
     "P3PChallengeError",
     "P3PCustomerAuthMode",
     "P3PEnvironment",
@@ -62,8 +72,10 @@ __all__ = [
     "decode_receipt",
     "encode_credential_header",
     "extract_amount_paise",
+    "has_grant_scope",
+    "missing_grant_scopes",
     "select_payment_method",
     "validate_challenge",
 ]
 
-__version__ = "0.1.5"
+__version__ = "1.1.0"

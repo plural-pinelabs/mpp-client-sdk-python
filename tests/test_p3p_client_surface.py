@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import httpx
 import pytest
 
 from pinelabs_p3p_client import (
     Amount,
+    ClientGrantexConfig,
     ClientRuntimeContext,
     CreateTokenOptions,
+    GRANTEX_TOKEN_HEADER,
+    GrantexVerificationResult,
     P3PChallengeError,
     P3PCustomerAuthMode,
     P3PEnvironment,
@@ -44,7 +48,7 @@ class _ClientTransport(httpx.BaseTransport):
                                     "amount": "100.00",
                                     "currency": "INR",
                                     "resource": "/api/premium",
-                                    "availablePaymentMethods": ["RESERVE_PAY", "CRYPTO"],
+                                    "availablePaymentMethods": ["RESERVE_PAY", "OTM"],
                                 },
                                 "expires": "2030-01-01T00:00:00Z",
                             }
@@ -93,6 +97,16 @@ class _ClientTransport(httpx.BaseTransport):
         return httpx.Response(404, json={"error": {"message": request.url.path}})
 
 
+class _GrantVerifier:
+    def __init__(self, result: GrantexVerificationResult) -> None:
+        self.result = result
+        self.tokens: list[str] = []
+
+    def verify(self, token: str) -> GrantexVerificationResult:
+        self.tokens.append(token)
+        return self.result
+
+
 def _patch_httpx_client(monkeypatch: pytest.MonkeyPatch, transport: httpx.BaseTransport) -> None:
     real_client = httpx.Client
 
@@ -109,10 +123,10 @@ def test_client_uses_runtime_context_customer_token_endpoint_and_p3p_header(monk
 
     client = PineLabsOnlineClient.create(
         PineLabsOnlineClientConfig(
-            selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
             customerAuthMode=P3PCustomerAuthMode.CustomerKey,
             clientId="client-client",
             clientSecret="client-secret",
+            merchantId="merchant-test",
             env=P3PEnvironment.SANDBOX,
         )
     )
@@ -123,6 +137,7 @@ def test_client_uses_runtime_context_customer_token_endpoint_and_p3p_header(monk
                 customerKey="ck_test",
                 customerReference="9876543210",
                 mobileNumber="9876543210",
+                paymentMethod=PaymentMethod.RESERVE_PAY,
             ),
         )
     finally:
@@ -149,9 +164,140 @@ def test_client_uses_runtime_context_customer_token_endpoint_and_p3p_header(monk
     credential = decode_json(paid_retry.headers["P3P-Credential"].removeprefix("Payment ").strip())
     assert credential["source"] == "9876543210"
     assert "paymentGateway" not in credential["challenge"]
-    assert credential["payload"]["customer_reference"] == "9876543210"
+    assert "customer_reference" not in credential["payload"]
+    assert credential["payload"]["payment_method_reference_id"] == "auth_runtime"
     assert credential["payload"]["mobile_number"] == "9876543210"
     assert credential["payload"]["payment_method"] == "RESERVE_PAY"
+
+
+@pytest.mark.parametrize(
+    ("payment_method", "wire_value"),
+    [
+        (PaymentMethod.CARD, "CARD"),
+        (PaymentMethod.CREDIT_EMI, "CREDIT_EMI"),
+    ],
+)
+def test_client_methods_preserve_card_and_credit_emi_token_methods(
+    monkeypatch: pytest.MonkeyPatch,
+    payment_method: PaymentMethod,
+    wire_value: str,
+) -> None:
+    class _PaymentTokenTransport(httpx.BaseTransport):
+        def __init__(self) -> None:
+            self.requests: list[httpx.Request] = []
+
+        def handle_request(self, request: httpx.Request) -> httpx.Response:
+            self.requests.append(request)
+            if request.url.path == "/api/auth/v1/token":
+                return httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "access_token": "client-access-token",
+                            "expires_in": 300,
+                        }
+                    },
+                )
+
+            if request.url.path == "/api/v1/customer/mpp/token":
+                body = json.loads(request.content.decode() or "{}")
+                assert request.headers["X-Customer-Key"] == "ck_card_test"
+                assert request.headers["Authorization"] == "Bearer client-access-token"
+                assert body == {
+                    "payment_method": wire_value,
+                    "customer": {"mobile_number": "9876543210"},
+                    "challenge_id": "ch_card_123",
+                    "payment_amount": {"value": 2500, "currency": "INR"},
+                    "payment_method_reference_id": "auth_method_123",
+                }
+                return httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "payment_token": "tok_method_123",
+                            "expires_in": 300,
+                            "payment_method": wire_value,
+                            "payment_method_reference_id": "auth_method_123",
+                        }
+                    },
+                )
+
+            return httpx.Response(404, json={"error": {"message": request.url.path}})
+
+    transport = _PaymentTokenTransport()
+    _patch_httpx_client(monkeypatch, transport)
+
+    client = PineLabsOnlineClient.create(
+        PineLabsOnlineClientConfig(
+            customerAuthMode=P3PCustomerAuthMode.CustomerKey,
+            clientId="client-client",
+            clientSecret="client-secret",
+            merchantId="merchant-test",
+            env=P3PEnvironment.SANDBOX,
+        )
+    )
+    try:
+        token = client.methods.create_token(
+            CreateTokenOptions(
+                customerKey="ck_card_test",
+                mobileNumber="9876543210",
+                challengeId="ch_card_123",
+                paymentAmount=Amount(value=2500, currency="INR"),
+                paymentMethod=payment_method,
+                paymentMethodReferenceId="auth_method_123",
+            )
+        )
+    finally:
+        client.close()
+
+    assert token.token == "tok_method_123"
+    assert token.payment_method == payment_method
+    assert token.mandate_id == "auth_method_123"
+    assert [request.url.path for request in transport.requests] == ["/api/auth/v1/token", "/api/v1/customer/mpp/token"]
+
+
+def test_client_forwards_and_verifies_grantex_grant_during_automatic_payment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = _ClientTransport()
+    _patch_httpx_client(monkeypatch, transport)
+
+    grant = SimpleNamespace(agent_did="did:web:agent.example", scopes=["mpp:*"])
+    verifier = _GrantVerifier(GrantexVerificationResult(valid=True, grant=grant))
+    client = PineLabsOnlineClient.create(
+        PineLabsOnlineClientConfig(
+            customerAuthMode=P3PCustomerAuthMode.CustomerKey,
+            clientId="client-client",
+            clientSecret="client-secret",
+            merchantId="merchant-test",
+            env=P3PEnvironment.SANDBOX,
+            grantex=ClientGrantexConfig(
+                grantToken="grant_token_123",
+                agentId="did:web:agent.example",
+                requiredScopes=["mpp:payment:initiate"],
+                enforceGrant=True,
+                verifier=verifier,
+            ),
+        )
+    )
+    try:
+        response = client.get(
+            "https://server.test/api/premium",
+            context=ClientRuntimeContext(
+                customerKey="ck_test",
+                mobileNumber="9876543210",
+                paymentMethod=PaymentMethod.RESERVE_PAY,
+            ),
+        )
+    finally:
+        client.close()
+
+    assert response.status_code == 200
+    resource_requests = [req for req in transport.requests if req.url.path == "/api/premium"]
+    assert len(resource_requests) == 2
+    assert verifier.tokens == ["grant_token_123"]
+    for request in resource_requests:
+        assert request.headers[GRANTEX_TOKEN_HEADER] == "grant_token_123"
 
 
 def test_client_defaults_to_client_credentials_token_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -160,9 +306,9 @@ def test_client_defaults_to_client_credentials_token_endpoint(monkeypatch: pytes
 
     client = PineLabsOnlineClient.create(
         PineLabsOnlineClientConfig(
-            selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
             clientId="client-client",
             clientSecret="client-secret",
+            merchantId="merchant-test",
             env=P3PEnvironment.SANDBOX,
         )
     )
@@ -170,8 +316,10 @@ def test_client_defaults_to_client_credentials_token_endpoint(monkeypatch: pytes
         token = client.methods.create_token(
             CreateTokenOptions(
                 customerReference="cust-ref-default",
+                mobileNumber="9876543210",
                 challengeId="ch_default",
                 paymentAmount=Amount(value=100, currency="INR"),
+                paymentMethod=PaymentMethod.RESERVE_PAY,
             )
         )
     finally:
@@ -194,10 +342,35 @@ def test_client_defaults_to_client_credentials_token_endpoint(monkeypatch: pytes
     assert "X-Customer-Key" not in token_request.headers
     assert token_body == {
         "payment_method": "RESERVE_PAY",
-        "customer": {"merchant_customer_reference": "cust-ref-default"},
+        "customer": {"mobile_number": "9876543210"},
         "challenge_id": "ch_default",
         "payment_amount": {"value": 100, "currency": "INR"},
     }
+
+
+def test_client_runtime_context_rejects_crypto_as_currently_unsupported(monkeypatch: pytest.MonkeyPatch) -> None:
+    transport = _ClientTransport()
+    _patch_httpx_client(monkeypatch, transport)
+
+    client = PineLabsOnlineClient.create(
+        PineLabsOnlineClientConfig(
+            clientId="client-client",
+            clientSecret="client-secret",
+            merchantId="merchant-test",
+            env=P3PEnvironment.SANDBOX,
+        )
+    )
+    try:
+        with pytest.raises(RuntimeError, match=r"PaymentMethod\.Crypto is currently not supported in SDKs"):
+            client.get(
+                "https://server.test/api/premium",
+                context=ClientRuntimeContext(
+                    mobileNumber="9876543210",
+                    paymentMethod=PaymentMethod.Crypto,
+                ),
+            )
+    finally:
+        client.close()
 
 
 def test_client_uses_separate_http_clients_for_internal_and_resource_calls(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -217,10 +390,10 @@ def test_client_uses_separate_http_clients_for_internal_and_resource_calls(monke
 
     client = PineLabsOnlineClient.create(
         PineLabsOnlineClientConfig(
-            selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
             env=P3PEnvironment.SANDBOX,
             clientId="cid",
             clientSecret="secret",
+            merchantId="merchant-test",
             requestTimeoutMs=10_000,
         )
     )
@@ -235,7 +408,18 @@ def test_client_credentials_default_requires_client_credentials() -> None:
     with pytest.raises(ValueError, match="clientId and clientSecret"):
         PineLabsOnlineClient.create(
             PineLabsOnlineClientConfig(
-                selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
+                env=P3PEnvironment.SANDBOX,
+            )
+        )
+
+
+def test_client_config_requires_merchant_id_before_network() -> None:
+    with pytest.raises(ValueError, match="merchantId is required"):
+        PineLabsOnlineClient.create(
+            PineLabsOnlineClientConfig(
+                clientId="client-client",
+                clientSecret="client-secret",
+                merchantId="",
                 env=P3PEnvironment.SANDBOX,
             )
         )
@@ -247,10 +431,10 @@ def test_customer_key_mode_remains_explicit(monkeypatch: pytest.MonkeyPatch) -> 
 
     client = PineLabsOnlineClient.create(
         PineLabsOnlineClientConfig(
-            selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
             customerAuthMode=P3PCustomerAuthMode.CustomerKey,
             clientId="client-client",
             clientSecret="client-secret",
+            merchantId="merchant-test",
             env=P3PEnvironment.SANDBOX,
         )
     )
@@ -261,6 +445,7 @@ def test_customer_key_mode_remains_explicit(monkeypatch: pytest.MonkeyPatch) -> 
                 mobileNumber="9876543210",
                 challengeId="ch_customer_key",
                 paymentAmount=Amount(value=100, currency="INR"),
+                paymentMethod=PaymentMethod.RESERVE_PAY,
             )
         )
     finally:
@@ -286,10 +471,10 @@ def test_customer_key_mode_defaults_to_production_customer_token_host(monkeypatc
 
     client = PineLabsOnlineClient.create(
         PineLabsOnlineClientConfig(
-            selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
             customerAuthMode=P3PCustomerAuthMode.CustomerKey,
             clientId="client-client",
             clientSecret="client-secret",
+            merchantId="merchant-test",
         )
     )
     try:
@@ -299,6 +484,7 @@ def test_customer_key_mode_defaults_to_production_customer_token_host(monkeypatc
                 mobileNumber="9876543210",
                 challengeId="ch_customer_key",
                 paymentAmount=Amount(value=100, currency="INR"),
+                paymentMethod=PaymentMethod.RESERVE_PAY,
             )
         )
     finally:
@@ -322,10 +508,10 @@ def test_client_requires_runtime_context_for_auto_payment(monkeypatch: pytest.Mo
     _patch_httpx_client(monkeypatch, transport)
     client = PineLabsOnlineClient.create(
         PineLabsOnlineClientConfig(
-            selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
             customerAuthMode=P3PCustomerAuthMode.CustomerKey,
             clientId="client-client",
             clientSecret="client-secret",
+            merchantId="merchant-test",
             env=P3PEnvironment.SANDBOX,
         )
     )

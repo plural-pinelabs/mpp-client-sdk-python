@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pinelabs-online-p3p-client-sdk"
-version = "0.1.5"
+version = "1.1.0"
 description = "Pine Labs Online P3P Client SDK — x402 Pine Labs Online P3P client for AI agents (Python)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Pine Labs Online" }]
-keywords = ["mpp", "x402", "payment", "client", "upi", "sbmd", "machine-payments"]
+keywords = ["mpp", "p3p", "x402", "payment", "client", "upi", "reserve-pay", "machine-payments"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -25,6 +25,7 @@ classifiers = [
 ]
 dependencies = [
     "httpx>=0.27",
+    "grantex==0.3.9",
 ]
 
 [project.optional-dependencies]

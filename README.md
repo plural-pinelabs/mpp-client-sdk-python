@@ -26,9 +26,9 @@ from pinelabs_p3p_client import (
 
 client = PineLabsOnlineClient.create(PineLabsOnlineClientConfig(
     env=P3PEnvironment.SANDBOX,
-    selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
     clientId="client-client-id",
     clientSecret="client-client-secret",
+    merchantId="merchant-id",
 ))
 
 response = client.get(
@@ -36,18 +36,22 @@ response = client.get(
     context=ClientRuntimeContext(
         customerReference="9876543210",
         mobileNumber="9876543210",
+        paymentMethod=PaymentMethod.RESERVE_PAY,
     ),
 )
 print(response.json())
 client.close()
 ```
 
-Customer identity is runtime context, not static SDK config. This lets one
-client instance safely serve many customers.
+Customer identity and payment method are runtime context, not static SDK config.
+This lets one client instance safely serve many customers and payment choices.
+`paymentMethod` is required for automatic 402 handling.
 
 By default, the SDK uses client-credentials customer auth: it exchanges
 `clientId` and `clientSecret` through `POST /api/auth/v1/token`, then calls
-`POST /mpp/v1/token`.
+`POST /mpp/v1/token`. `merchantId` is mandatory and is sent as `Merchant-ID`
+for token creation across `RESERVE_PAY`, `OTM`, `CARD`, and `CREDIT_EMI`.
+The SDK rejects missing MID during construction, before any network call.
 
 For customer API-token flows, explicitly set
 `customerAuthMode=P3PCustomerAuthMode.CustomerKey` and pass `customerKey` plus
@@ -80,7 +84,7 @@ token = client.methods.create_token(CreateTokenOptions(
     mobileNumber="9876543210",
     challengeId="ch_...",
     paymentAmount=Amount(value=50000, currency="INR"),
-    paymentMethod=PaymentMethod.UPI_RESERVE_PAY,
+    paymentMethod=PaymentMethod.RESERVE_PAY,
 ))
 ```
 
@@ -94,10 +98,10 @@ from pinelabs_p3p_client import P3PCustomerAuthMode
 
 customer_key_client = PineLabsOnlineClient.create(PineLabsOnlineClientConfig(
     env=P3PEnvironment.SANDBOX,
-    selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
     customerAuthMode=P3PCustomerAuthMode.CustomerKey,
     clientId="client-client-id",
     clientSecret="client-client-secret",
+    merchantId="merchant-id",
 ))
 ```
 
@@ -114,8 +118,28 @@ Environment defaults:
 
 ## Supported Methods
 
-- `PaymentMethod.UPI_RESERVE_PAY` -> `"RESERVE_PAY"` / UPI ReservePay
-- `PaymentMethod.Crypto` -> `"CRYPTO"`
+- `PaymentMethod.RESERVE_PAY` -> `"RESERVE_PAY"` / UPI ReservePay
+- `PaymentMethod.OTM` -> `"OTM"`
+- `PaymentMethod.CARD` -> `"CARD"`
+- `PaymentMethod.Crypto` -> `"CRYPTO"` *(currently rejected by token creation)*
+
+### CARD
+
+Card payments require an active card pre-authorization on the **server** side
+(see the Server SDK's `create_pre_authorization`). The Client SDK creates the
+token bound to that pre-auth; the Server SDK's debit call then sends
+`payment_method_reference_id` = the pre-auth reference id.
+
+```python
+response = client.get(
+    "https://server.example.com/api/premium",
+    context=ClientRuntimeContext(
+        customerReference="9876543210",
+        mobileNumber="9876543210",
+        paymentMethod=PaymentMethod.CARD,
+    ),
+)
+```
 
 ## Error Handling
 
@@ -130,6 +154,57 @@ except P3PNetworkError as err:
     ...
 except P3PError as err:
     print(err.code, err.http_status, err.details)
+```
+
+## Grantex (Delegated Agent Authorization)
+
+Set `grantex` in config to attach and optionally verify a Grantex grant token
+on every payment request.
+
+```python
+from pinelabs_p3p_client import (
+    P3PEnvironment,
+    PineLabsOnlineClient,
+    PineLabsOnlineClientConfig,
+)
+from pinelabs_p3p_client.types.config import ClientGrantexConfig
+
+client = PineLabsOnlineClient.create(PineLabsOnlineClientConfig(
+    env=P3PEnvironment.SANDBOX,
+    clientId="...",
+    clientSecret="...",
+    merchantId="...",
+    grantex=ClientGrantexConfig(
+        enforceGrant=True,                            # raise before payment if no grant token
+        agentId=os.environ.get("GRANTEX_AGENT_ID"),  # optional: assert grant is for this agent
+        requiredScopes=["mpp:payment:initiate"],       # optional: assert grant has these scopes
+        # baseUrl defaults to https://api.grantex.dev
+        # Set only for self-hosted Grantex:
+        # baseUrl="https://my-grantex.company.com",
+    ),
+))
+```
+
+The JWKS URI is always `<baseUrl>/.well-known/jwks.json`. The path is constant;
+only the base URL changes for self-hosted deployments.
+
+| Setting | JWKS endpoint |
+|---------|---------------|
+| `baseUrl` not set | `https://api.grantex.dev/.well-known/jwks.json` |
+| `baseUrl="https://my-grantex.co"` | `https://my-grantex.co/.well-known/jwks.json` |
+| `jwksUri="https://..."` | That exact URL (takes precedence over `baseUrl`) |
+
+Pass the grant token per request:
+
+```python
+response = client.get(
+    url,
+    context=ClientRuntimeContext(
+        mobileNumber="9876543210",
+        paymentMethod=PaymentMethod.RESERVE_PAY,
+        grantexToken=user_grant_token,   # per-request grant token
+    ),
+)
 ```
 
 ## License

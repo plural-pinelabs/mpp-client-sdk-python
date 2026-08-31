@@ -29,8 +29,8 @@ def build_credential(
     agent_id: str,
     token: str,
     payment_method: PaymentMethod,
-    customer_reference: Optional[str] = None,
     mobile_number: Optional[str] = None,
+    payment_method_reference_id: Optional[str] = None,
 ) -> Credential:
     """Build the client credential object that authorizes one server debit attempt."""
     return Credential(
@@ -39,7 +39,7 @@ def build_credential(
         payload=CredentialPayload(
             type="token",
             token=token,
-            customer_reference=str(customer_reference or "").strip() or None,
+            payment_method_reference_id=str(payment_method_reference_id or "").strip() or None,
             mobile_number=str(mobile_number or "").strip() or None,
             payment_method=payment_method,
         ),
@@ -49,8 +49,8 @@ def build_credential(
 def encode_credential_header(credential: Credential) -> str:
     """Encode a credential as a `Payment <base64url>` value for `P3P-Credential`."""
     credential_payload = {"type": credential.payload.type, "token": credential.payload.token}
-    if credential.payload.customer_reference:
-        credential_payload["customer_reference"] = credential.payload.customer_reference
+    if credential.payload.payment_method_reference_id:
+        credential_payload["payment_method_reference_id"] = credential.payload.payment_method_reference_id
     if credential.payload.mobile_number:
         credential_payload["mobile_number"] = credential.payload.mobile_number
     credential_payload["payment_method"] = _payment_method_value(credential.payload.payment_method)
@@ -180,8 +180,14 @@ def _parse_payment_gateway(value: Any) -> Optional[PaymentGateway]:
 
 
 def _parse_payment_method(value: Any) -> PaymentMethod:
-    if value == PaymentMethod.UPI_RESERVE_PAY.value:
-        return PaymentMethod.UPI_RESERVE_PAY
+    if value == PaymentMethod.RESERVE_PAY.value:
+        return PaymentMethod.RESERVE_PAY
+    if value == PaymentMethod.OTM.value:
+        return PaymentMethod.OTM
+    if value == PaymentMethod.CARD.value:
+        return PaymentMethod.CARD
+    if value == PaymentMethod.CREDIT_EMI.value:
+        return PaymentMethod.CREDIT_EMI
     if value == PaymentMethod.Crypto.value:
         return PaymentMethod.Crypto
     return value or ""

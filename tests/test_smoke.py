@@ -34,8 +34,9 @@ def _server_config(base_url: str) -> PineLabsOnlineServerConfig:
     return PineLabsOnlineServerConfig(
         clientId="server-id",
         clientSecret="server-secret",
+        merchantId="merchant-test",
         paymentGateway=ServerPaymentGateway.PineLabsOnline,
-        availablePaymentMethods=[ServerPaymentMethod.UPI_RESERVE_PAY, ServerPaymentMethod.Crypto],
+        availablePaymentMethods=[ServerPaymentMethod.RESERVE_PAY, ServerPaymentMethod.OTM],
         realm=P3PEnvironment.SANDBOX,
         env=base_url,
         maxRetries=0,
@@ -44,10 +45,10 @@ def _server_config(base_url: str) -> PineLabsOnlineServerConfig:
 
 def _client_config(base_url: str) -> PineLabsOnlineClientConfig:
     return PineLabsOnlineClientConfig(
-        selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
         customerAuthMode=P3PCustomerAuthMode.CustomerKey,
         clientId="client-id",
         clientSecret="client-secret",
+        merchantId="merchant-test",
         env=base_url,
         maxRetries=0,
     )
@@ -64,7 +65,58 @@ def test_challenge_roundtrip() -> None:
     assert challenge.id == result.challenge.id
     assert challenge.request.currency == "INR"
     assert challenge.request.amount == "150.00"
-    assert challenge.request.availablePaymentMethods == [PaymentMethod.UPI_RESERVE_PAY, PaymentMethod.Crypto]
+    assert challenge.request.availablePaymentMethods == [PaymentMethod.RESERVE_PAY, PaymentMethod.OTM]
+
+
+def test_payment_method_exposes_reserve_pay_member() -> None:
+    assert PaymentMethod.RESERVE_PAY.value == "RESERVE_PAY"
+    assert PaymentMethod.OTM.value == "OTM"
+    assert PaymentMethod.CARD.value == "CARD"
+    assert not hasattr(PaymentMethod, "UPI_RESERVE_PAY")
+
+
+def test_challenge_decode_supports_otm_payment_method() -> None:
+    header = "Payment " + encode_json(
+        {
+            "id": "ch_otm",
+            "realm": "Pine Labs Online P3P",
+            "intent": "charge",
+            "request": {
+                "scheme": "exact",
+                "amount": "100.00",
+                "currency": "INR",
+                "resource": "/api/x",
+                "availablePaymentMethods": ["OTM"],
+            },
+            "expires": "2030-01-01T00:00:00Z",
+        }
+    )
+
+    challenge = decode_challenge(header)
+
+    assert challenge.request.availablePaymentMethods == [PaymentMethod.OTM]
+
+
+def test_challenge_decode_supports_card_payment_method() -> None:
+    header = "Payment " + encode_json(
+        {
+            "id": "ch_card",
+            "realm": "Pine Labs Online P3P",
+            "intent": "charge",
+            "request": {
+                "scheme": "exact",
+                "amount": "10.00",
+                "currency": "INR",
+                "resource": "/api/x",
+                "availablePaymentMethods": ["CARD"],
+            },
+            "expires": "2030-01-01T00:00:00Z",
+        }
+    )
+
+    challenge = decode_challenge(header)
+
+    assert challenge.request.availablePaymentMethods == [PaymentMethod.CARD]
 
 
 class _MockTransport(httpx.BaseTransport):
@@ -185,7 +237,7 @@ def _capture_options_from_credential(credential) -> Any:  # noqa: ANN401
         token=credential.payload.token,
         amount=ServerAmount(value=round(amt_major * 100), currency=credential.challenge.request.currency),
         paymentMethod=credential.payload.payment_method,
-        customerReference=credential.payload.customer_reference,
+        paymentMethodReferenceId=credential.payload.payment_method_reference_id,
         mobileNumber=credential.payload.mobile_number,
         challengeId=credential.challenge.id,
     )
@@ -217,6 +269,7 @@ def test_end_to_end_402_flow(monkeypatch: pytest.MonkeyPatch) -> None:
                 customerKey="ck_smoke",
                 customerReference="9876543210",
                 mobileNumber="9876543210",
+                paymentMethod=PaymentMethod.RESERVE_PAY,
             ),
         )
         assert response.status_code == 200
@@ -228,7 +281,7 @@ def test_end_to_end_402_flow(monkeypatch: pytest.MonkeyPatch) -> None:
         assert receipt.status == "success"
         assert not hasattr(receipt, "method")
         assert receipt.paymentGateway == PaymentGateway.PineLabsOnline
-        assert receipt.paymentMethod == PaymentMethod.UPI_RESERVE_PAY
+        assert receipt.paymentMethod == PaymentMethod.RESERVE_PAY
         assert receipt.settlement.amount == "150.00"
         assert receipt.settlement.currency == "INR"
         debit_request = next(req for req in transport.requests if req.url.path == "/mpp/v1/debit")
@@ -303,7 +356,7 @@ def test_protected_resource_call_is_not_bounded_by_sdk_request_timeout(monkeypat
                                     "amount": "100.00",
                                     "currency": "INR",
                                     "resource": "/api/premium",
-                                    "availablePaymentMethods": ["RESERVE_PAY", "CRYPTO"],
+                                    "availablePaymentMethods": ["RESERVE_PAY", "OTM"],
                                 },
                                 "expires": "2030-01-01T00:00:00Z",
                             }
@@ -328,10 +381,10 @@ def test_protected_resource_call_is_not_bounded_by_sdk_request_timeout(monkeypat
 
     client = PineLabsOnlineClient.create(
         PineLabsOnlineClientConfig(
-            selectedPaymentMethod=PaymentMethod.UPI_RESERVE_PAY,
             customerAuthMode=P3PCustomerAuthMode.CustomerKey,
             clientId="client-id",
             clientSecret="client-secret",
+            merchantId="merchant-test",
             env=P3PEnvironment.SANDBOX,
             requestTimeoutMs=10_000,
             maxRetries=0,
@@ -344,6 +397,7 @@ def test_protected_resource_call_is_not_bounded_by_sdk_request_timeout(monkeypat
                 customerKey="ck_test",
                 customerReference="9876543210",
                 mobileNumber="9876543210",
+                paymentMethod=PaymentMethod.RESERVE_PAY,
             ),
         )
     finally:

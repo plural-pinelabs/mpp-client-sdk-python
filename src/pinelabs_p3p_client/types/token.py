@@ -37,7 +37,7 @@ class Token:
     """Normalized one-time P3P payment token response.
 
     The current P3P service contract returns `payment_token`, `expires_in`,
-    `type`, and `authorization_id`; additional fields remain optional
+    `payment_method`, and `authorization_id`; additional fields remain optional
     compatibility slots for older responses.
     """
 
@@ -45,8 +45,11 @@ class Token:
     object: str
     customer_reference: str
     customer_id: str
+    mobile_number: Optional[str]
     mandate_id: str
     token: str
+    payment_method: Optional[PaymentMethod]
+    payment_amount: Optional[Amount]
     challenge_id: Optional[str]
     hold: TokenHold
     usage_limits: UsageLimits
@@ -84,3 +87,4 @@ class CreateTokenOptions:
     paymentAmount: Optional[Amount] = None
     metadata: Optional[Dict[str, str]] = None
     paymentMethod: Optional[PaymentMethod] = None
+    paymentMethodReferenceId: Optional[str] = None

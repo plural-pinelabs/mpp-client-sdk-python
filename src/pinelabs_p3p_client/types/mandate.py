@@ -55,9 +55,9 @@ class Mandate:
 class CreateMandateOptions:
     """Input for `client.methods.create_mandate`.
 
-    The SDK maps this to `POST /mpp/v1/pre-authorize`. `customerReference`
-    is preferred; if absent the SDK falls back to `customerId` and then the
-    normalized mobile number for local compatibility.
+    The SDK maps this to `POST /mpp/v1/pre-authorize`. Current service
+    contracts are mobile-only; `customerReference` and `customerId` remain
+    as legacy compatibility fields.
     """
 
     mobileNumber: Optional[str] = None

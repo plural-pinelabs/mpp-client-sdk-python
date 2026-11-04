@@ -253,6 +253,8 @@ def _parse_payment_method(value: Any) -> Optional[PaymentMethod]:
         return PaymentMethod.CARD
     if value == PaymentMethod.CREDIT_EMI.value:
         return PaymentMethod.CREDIT_EMI
+    if value == PaymentMethod.WALLET.value:
+        return PaymentMethod.WALLET
     if value == PaymentMethod.Crypto.value:
         return PaymentMethod.Crypto
     return None

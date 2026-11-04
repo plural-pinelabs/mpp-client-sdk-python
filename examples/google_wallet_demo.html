@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><title>MPP Google Pay Wallet Test</title>
+  <style>body{font:16px system-ui;max-width:760px;margin:40px auto;padding:0 20px}section{border:1px solid #ddd;border-radius:8px;padding:18px;margin:14px 0}label{display:block;margin:10px 0}input{padding:8px;width:280px}button{padding:9px 14px;margin-top:8px}pre{background:#f5f5f5;padding:12px;white-space:pre-wrap;min-height:70px}</style>
+</head>
+<body>
+  <h1>MPP Google Pay Wallet test</h1>
+  <p>This local merchant page drives the Seller SDK → Checkout → Buyer SDK → Seller SDK flow for Card or Google Pay Wallet.</p>
+  <section><h2>1. Create authorization</h2>
+    <label>Payment method <select id="payment_method"><option value="WALLET">Wallet / Google Pay</option><option value="CARD">Card</option></select></label>
+    <label>Customer mobile <input id="mobile" value="9876543210"></label>
+    <label>Amount (paise) <input id="amount" value="10000" type="number"></label>
+    <button onclick="preauth()">Create authorization</button>
+  </section>
+  <section><h2>2. Complete Google Pay</h2>
+    <p>Open the challenge URL returned above in Checkout. After Checkout receives the callback, paste the resulting challenge ID.</p>
+    <label>Challenge ID <input id="challenge"></label>
+    <button onclick="token()">Create Buyer token</button>
+  </section>
+  <section><h2>3. Debit</h2><button onclick="debit()">Capture/debit Wallet payment</button></section>
+  <h2>Response</h2><pre id="output">Ready.</pre>
+<script>
+const out = document.getElementById('output');
+async function call(path, data) { const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data||{})}); const j=await r.json(); out.textContent=JSON.stringify(j,null,2); if(!r.ok) throw new Error(j.error||'Request failed'); return j; }
+async function preauth(){try{const j=await call('/api/preauthorize',{mobile_number:mobile.value,amount_paise:amount.value}); if(j.challenge_url) window.open(j.challenge_url,'_blank');}catch(e){out.textContent=e}}
+async function token(){try{await call('/api/token',{mobile_number:mobile.value,amount_paise:amount.value,challenge_id:challenge.value})}catch(e){out.textContent=e}}
+async function debit(){try{await call('/api/debit',{mobile_number:mobile.value,amount_paise:amount.value,challenge_id:challenge.value})}catch(e){out.textContent=e}}
+</script>
+</body></html>

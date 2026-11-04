@@ -65,16 +65,24 @@ def validate_create_token_options(
         raise ValueError("CreateTokenOptions: paymentMethod is required")
     if not is_supported_payment_method(options.paymentMethod):
         raise _unsupported_payment_method_error("CreateTokenOptions: paymentMethod", options.paymentMethod)
+    if options.paymentMethod == PaymentMethod.WALLET and not str(options.paymentMethodReferenceId or "").strip():
+        raise ValueError("CreateTokenOptions: paymentMethodReferenceId is required for WALLET")
 
 
 def is_supported_payment_method(value: object) -> bool:
-    return value in (PaymentMethod.RESERVE_PAY, PaymentMethod.OTM, PaymentMethod.CARD, PaymentMethod.CREDIT_EMI)
+    return value in (
+        PaymentMethod.RESERVE_PAY,
+        PaymentMethod.OTM,
+        PaymentMethod.CARD,
+        PaymentMethod.CREDIT_EMI,
+        PaymentMethod.WALLET,
+    )
 
 
 def _unsupported_payment_method_error(context: str, value: object) -> ValueError:
     if value == PaymentMethod.Crypto:
         return ValueError(f"{context}: PaymentMethod.Crypto is currently not supported in SDKs")
-    return ValueError(f"{context}: payment method must be RESERVE_PAY, OTM, CARD, or CREDIT_EMI")
+    return ValueError(f"{context}: payment method must be RESERVE_PAY, OTM, CARD, CREDIT_EMI, or WALLET")
 
 
 def resolve_customer_auth_mode(config: PineLabsOnlineClientConfig) -> P3PCustomerAuthMode:

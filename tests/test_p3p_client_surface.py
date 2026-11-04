@@ -175,6 +175,7 @@ def test_client_uses_runtime_context_customer_token_endpoint_and_p3p_header(monk
     [
         (PaymentMethod.CARD, "CARD"),
         (PaymentMethod.CREDIT_EMI, "CREDIT_EMI"),
+        (PaymentMethod.WALLET, "WALLET"),
     ],
 )
 def test_client_methods_preserve_card_and_credit_emi_token_methods(
@@ -254,6 +255,41 @@ def test_client_methods_preserve_card_and_credit_emi_token_methods(
     assert token.payment_method == payment_method
     assert token.mandate_id == "auth_method_123"
     assert [request.url.path for request in transport.requests] == ["/api/auth/v1/token", "/api/v1/customer/mpp/token"]
+
+
+def test_client_rejects_wallet_token_without_authorization_reference_before_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _WalletValidationTransport(httpx.BaseTransport):
+        def __init__(self) -> None:
+            self.requests: list[httpx.Request] = []
+
+        def handle_request(self, request: httpx.Request) -> httpx.Response:
+            self.requests.append(request)
+            return httpx.Response(500, json={"error": {"message": "network should not be called"}})
+
+    transport = _WalletValidationTransport()
+    _patch_httpx_client(monkeypatch, transport)
+    client = PineLabsOnlineClient.create(PineLabsOnlineClientConfig(
+        customerAuthMode=P3PCustomerAuthMode.CustomerKey,
+        clientId="client-client",
+        clientSecret="client-secret",
+        merchantId="merchant-test",
+        env=P3PEnvironment.SANDBOX,
+    ))
+    try:
+        with pytest.raises(ValueError, match="paymentMethodReferenceId is required for WALLET"):
+            client.methods.create_token(CreateTokenOptions(
+                customerKey="ck_wallet_test",
+                mobileNumber="9876543210",
+                challengeId="ch_wallet_123",
+                paymentAmount=Amount(value=2500, currency="INR"),
+                paymentMethod=PaymentMethod.WALLET,
+            ))
+    finally:
+        client.close()
+
+    assert transport.requests == []
 
 
 def test_client_forwards_and_verifies_grantex_grant_during_automatic_payment(

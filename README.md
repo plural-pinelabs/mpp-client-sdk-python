@@ -50,7 +50,8 @@ This lets one client instance safely serve many customers and payment choices.
 By default, the SDK uses client-credentials customer auth: it exchanges
 `clientId` and `clientSecret` through `POST /api/auth/v1/token`, then calls
 `POST /mpp/v1/token`. `merchantId` is mandatory and is sent as `Merchant-ID`
-for token creation across `RESERVE_PAY`, `OTM`, `CARD`, and `CREDIT_EMI`.
+for token creation across `RESERVE_PAY`, `OTM`, `CARD`, `CREDIT_EMI`, and
+`WALLET`.
 The SDK rejects missing MID during construction, before any network call.
 
 For customer API-token flows, explicitly set
@@ -90,6 +91,23 @@ token = client.methods.create_token(CreateTokenOptions(
 
 The client SDK no longer creates mandates. Mandate/pre-authorization creation
 is handled by the server SDK.
+
+For Google Pay wallet authorizations, use `WALLET` and carry the
+`payment_method_reference_id` returned by the Seller SDK pre-authorization:
+
+```python
+token = client.methods.create_token(CreateTokenOptions(
+    mobileNumber="9876543210",
+    challengeId="ch_...",
+    paymentAmount=Amount(value=50000, currency="INR"),
+    paymentMethod=PaymentMethod.WALLET,
+    paymentMethodReferenceId="wallet_authorization_id",
+))
+```
+
+The automatic 402 flow requires the same reference in
+`ClientRuntimeContext.paymentMethodReferenceId`; it is copied into the
+credential for the Seller SDK debit request.
 
 Customer-key mode remains available:
 

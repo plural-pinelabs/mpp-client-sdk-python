@@ -210,6 +210,8 @@ def _resolve_customer_context(
         raise RuntimeError("ClientRuntimeContext: paymentMethod is required")
     if not is_supported_payment_method(payment_method):
         raise RuntimeError(_unsupported_payment_method_message("ClientRuntimeContext: paymentMethod", payment_method))
+    if payment_method == PaymentMethod.WALLET and not payment_method_reference_id:
+        raise RuntimeError("ClientRuntimeContext: paymentMethodReferenceId is required for WALLET")
     if customer_auth_mode == P3PCustomerAuthMode.CustomerKey:
         if not customer_key or not mobile_number:
             raise RuntimeError(
@@ -243,7 +245,7 @@ def _required_text(value: Optional[str]) -> Optional[str]:
 def _unsupported_payment_method_message(context: str, value: object) -> str:
     if value == PaymentMethod.Crypto:
         return f"{context}: PaymentMethod.Crypto is currently not supported in SDKs"
-    return f"{context}: payment method must be RESERVE_PAY, OTM, CARD, or CREDIT_EMI"
+    return f"{context}: payment method must be RESERVE_PAY, OTM, CARD, CREDIT_EMI, or WALLET"
 
 
 def _resolve_grantex_token(

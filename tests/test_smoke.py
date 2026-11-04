@@ -72,6 +72,7 @@ def test_payment_method_exposes_reserve_pay_member() -> None:
     assert PaymentMethod.RESERVE_PAY.value == "RESERVE_PAY"
     assert PaymentMethod.OTM.value == "OTM"
     assert PaymentMethod.CARD.value == "CARD"
+    assert PaymentMethod.WALLET.value == "WALLET"
     assert not hasattr(PaymentMethod, "UPI_RESERVE_PAY")
 
 
